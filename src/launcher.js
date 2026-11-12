@@ -1,13 +1,10 @@
-import { spawn, execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { promisify } from 'node:util';
 import { configPath, loadConfig } from './config.js';
 import { requestClient, saveJson } from './storage.js';
 import { windowsDesktop } from './desktop.js';
-
-const execFileAsync = promisify(execFile);
 
 export async function startReceiver(config) {
   const runtime = path.join(path.dirname(config.configFile), '.runtime');
@@ -50,34 +47,10 @@ export async function stopReceiver(filename) {
   throw new Error('客户端正在完成当前任务，停止请求已发送，请稍后重试。');
 }
 
-export async function createShortcut(config) {
+export async function configureLauncher(config) {
   await saveJson(path.join(import.meta.dirname, '..', '.runtime', 'launcher.json'), {
     nodeExecutable: process.execPath, configFile: config.configFile,
   });
-  const entrypoint = path.join(import.meta.dirname, '..', 'client.ps1');
-  const args = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${entrypoint}" -Action Open`;
-  const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const script = `
-    $ErrorActionPreference = 'Stop'
-    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcutPath = Join-Path $shell.SpecialFolders.Item('Desktop') 'Notion 本机助手.lnk'
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $env:NOTION_LAUNCHER_EXE
-    $shortcut.Arguments = $env:NOTION_LAUNCHER_ARGS
-    $shortcut.WorkingDirectory = $env:NOTION_LAUNCHER_ROOT
-    $shortcut.WindowStyle = 7
-    $shortcut.Description = '打开 Notion，同时连接本机文件和程序'
-    $notion = Get-ItemProperty -LiteralPath 'Registry::HKEY_CLASSES_ROOT\\Notion\\shell\\open\\command' -ErrorAction SilentlyContinue
-    if ($notion -and $notion.'(default)' -match '^"([^"]+\\.exe)"') { $shortcut.IconLocation = $Matches[1] + ',0' }
-    $shortcut.Save()
-    [Console]::Out.Write($shortcutPath)
-  `;
-  const { stdout } = await execFileAsync(executable, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-    windowsHide: true, timeout: 15_000,
-    env: { ...process.env, NOTION_LAUNCHER_EXE: executable, NOTION_LAUNCHER_ARGS: args, NOTION_LAUNCHER_ROOT: path.dirname(config.configFile) },
-  });
-  return stdout.trim();
 }
 
 async function main() {
@@ -88,8 +61,8 @@ async function main() {
     return;
   }
   const config = await loadConfig();
-  if (action === 'shortcut') { console.log(await createShortcut(config)); return; }
-  if (!['open', 'start'].includes(action)) throw new Error('可用命令为 open、start、stop、status、shortcut。');
+  if (action === 'configure') { await configureLauncher(config); return; }
+  if (!['open', 'start'].includes(action)) throw new Error('可用命令为 open、start、stop、status、configure。');
   const running = await startReceiver(config);
   if (action === 'open') await windowsDesktop.openNotion();
   console.log(`后台接收器已就绪，进程 ${running.pid}。MCP 将在收到任务后启动。`);

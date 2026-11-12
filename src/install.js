@@ -62,7 +62,7 @@ async function install() {
     state.installed = new Date().toISOString();
     await saveJson(filename, state);
     console.log(`Skill 已安装并开启自动调用 ${state.url}`);
-    console.log('在 Notion 新建聊天后使用。完整安装会创建桌面上的“Notion 本机助手”快捷方式。');
+    console.log('在 Notion 新建聊天后使用。接收器在线期间，可以通过 Skill 开启、关闭或按需启动 MCP。');
   } finally {
     await client?.close();
     await unlock();

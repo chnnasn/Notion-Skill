@@ -3,12 +3,21 @@ import path from 'node:path';
 import { z } from 'zod';
 import { readJson, saveJson } from './storage.js';
 
-export const requestSchema = z.object({
+const requestBase = z.object({
   version: z.literal(1),
   deviceId: z.string().uuid(),
-  tool: z.enum(['list_roots', 'list_directory', 'get_path_info', 'read_file', 'search_files', 'list_apps', 'ensure_app', 'open_path']),
-  arguments: z.record(z.string(), z.unknown()).default({}),
-}).strict();
+});
+
+export const requestSchema = z.discriminatedUnion('tool', [
+  requestBase.extend({
+    tool: z.enum(['list_roots', 'list_directory', 'get_path_info', 'read_file', 'search_files', 'list_apps', 'ensure_app', 'open_path']),
+    arguments: z.record(z.string(), z.unknown()).default({}),
+  }).strict(),
+  requestBase.extend({
+    tool: z.literal('mcp_control'),
+    arguments: z.object({ action: z.enum(['start', 'stop', 'status', 'auto']) }).strict(),
+  }).strict(),
+]);
 
 const actionTools = new Set(['ensure_app', 'open_path']);
 
@@ -32,6 +41,8 @@ export class JobRunner {
     }
     const request = parsed.data;
     if (request.deviceId !== this.deviceId) return;
+    const isAction = actionTools.has(request.tool)
+      || (request.tool === 'mcp_control' && request.arguments.action !== 'status');
     const hash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
     const filename = path.join(this.journalDirectory, `${jobId}.json`);
     let record = await readJson(filename, null);
@@ -43,8 +54,8 @@ export class JobRunner {
       await this.queue.finish(jobId, record.status, record.result);
       return;
     }
-    if (actionTools.has(request.tool) && (record?.phase === 'executing' || (!record && job.status === 'running'))) {
-      record = { hash, phase: 'done', status: 'review', result: { code: 'EXECUTION_UNCERTAIN', message: '上次执行中断，打开或启动请求可能已提交。请检查电脑状态，需要再次操作时新建任务。' } };
+    if (isAction && (record?.phase === 'executing' || (!record && job.status === 'running'))) {
+      record = { hash, phase: 'done', status: 'review', result: { code: 'EXECUTION_UNCERTAIN', message: '上次执行中断，操作可能已提交。请检查电脑或 MCP 状态，需要再次操作时新建任务。' } };
       await saveJson(filename, record);
       await this.queue.finish(jobId, record.status, record.result);
       return;
@@ -77,7 +88,7 @@ export class JobRunner {
         result = { code: 'RESULT_TOO_LARGE', message: '结果超过单个任务的回传大小，请使用更小的 length、limit 或更精确的搜索范围新建任务。' };
       }
     } catch (error) {
-      status = actionTools.has(request.tool) ? 'review' : 'failed';
+      status = isAction ? 'review' : 'failed';
       result = { code: 'TOOL_ERROR', message: error.message };
     }
     await saveJson(filename, { hash, phase: 'done', status, result });

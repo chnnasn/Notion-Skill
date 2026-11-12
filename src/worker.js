@@ -21,15 +21,99 @@ export async function connectLocal(config) {
   return { client, pid: transport.pid, close: () => client.close() };
 }
 
-export async function processBatch({ ids, queue, config, signal, state = {}, startLocal = connectLocal }) {
+export class McpController {
+  constructor({ config, state = {}, startLocal = connectLocal }) {
+    this.config = config;
+    this.state = state;
+    this.startLocal = startLocal;
+    this.local = null;
+    this.state.mcpMode = 'auto';
+    this.state.mcpPid = null;
+  }
+
+  snapshot() {
+    return {
+      mode: this.state.mcpMode,
+      running: this.local !== null,
+      mcpPid: this.state.mcpPid,
+      receiverPid: process.pid,
+      scope: 'receiver_session',
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  async start() {
+    if (this.local) return;
+    const local = await this.startLocal(this.config);
+    this.local = local;
+    this.state.mcpPid = local.pid;
+    const onclose = local.client.onclose;
+    local.client.onclose = () => {
+      if (this.local === local) {
+        this.local = null;
+        this.state.mcpPid = null;
+      }
+      onclose?.();
+    };
+    console.log(`MCP 已启动，进程 ${local.pid}`);
+  }
+
+  async close() {
+    if (!this.local) return;
+    const local = this.local;
+    await local.close();
+    if (this.local === local) {
+      this.local = null;
+      this.state.mcpPid = null;
+    }
+    console.log('MCP 已关闭。');
+  }
+
+  async releaseIdle() {
+    if (this.state.mcpMode !== 'on') await this.close();
+  }
+
+  async callTool(request) {
+    if (request.name === 'mcp_control') {
+      switch (request.arguments.action) {
+        case 'start':
+          await this.start();
+          this.state.mcpMode = 'on';
+          break;
+        case 'stop':
+          this.state.mcpMode = 'off';
+          await this.close();
+          break;
+        case 'auto':
+          this.state.mcpMode = 'auto';
+          await this.close();
+          break;
+        case 'status':
+          break;
+        default:
+          throw new Error('未知 MCP 控制动作。');
+      }
+      const result = this.snapshot();
+      return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (this.state.mcpMode === 'off') {
+      const result = { code: 'MCP_DISABLED', message: 'MCP 已手动关闭。请在 Notion 中开启 MCP，或恢复按需启动后新建任务。' };
+      return { isError: true, structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    await this.start();
+    return this.local.client.callTool(request);
+  }
+}
+
+export async function processBatch({
+  ids, queue, config, signal, state = {}, startLocal = connectLocal,
+  mcp = new McpController({ config, state, startLocal }),
+}) {
   if (!ids.length || signal?.aborted) return;
-  const local = await startLocal(config);
   state.phase = 'executing';
-  state.mcpPid = local.pid;
-  console.log(`MCP 已按任务启动，进程 ${local.pid}`);
   try {
     const runner = new JobRunner({
-      queue, client: local.client, deviceId: config.notion.deviceId,
+      queue, client: mcp, deviceId: config.notion.deviceId,
       journalDirectory: path.join(path.dirname(config.configFile), '.runtime', 'jobs'),
     });
     for (const id of ids) {
@@ -38,10 +122,8 @@ export async function processBatch({ ids, queue, config, signal, state = {}, sta
       catch (error) { console.error(`任务 ${id} 将重试 ${error.message}`); }
     }
   } finally {
-    await local.close();
-    state.mcpPid = null;
-    state.phase = signal?.aborted ? 'stopping' : 'waiting';
-    console.log('本批任务处理结束，MCP 已关闭。');
+    try { await mcp.releaseIdle(); }
+    finally { state.phase = signal?.aborted ? 'stopping' : 'waiting'; }
   }
 }
 
@@ -52,6 +134,7 @@ export async function runWorker({ once = false, signal: externalSignal } = {}) {
   const controller = new AbortController();
   const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
   const state = { role: 'worker', phase: 'connecting', mcpPid: null };
+  const mcp = new McpController({ config, state });
   const unlock = await acquireLock(path.join(runtime, 'client.lock'), (command) => {
     if (command === 'stop') { state.phase = 'stopping'; controller.abort(); }
     return state;
@@ -68,7 +151,7 @@ export async function runWorker({ once = false, signal: externalSignal } = {}) {
         }
         const queue = new NotionQueue(remote, config.notion.deviceId);
         const ids = await queue.discover();
-        await processBatch({ ids, queue, config, signal, state });
+        await processBatch({ ids, queue, config, signal, state, mcp });
         failures = 0;
       } catch (error) {
         console.error(`连接暂不可用 ${error.message}`);
@@ -84,8 +167,11 @@ export async function runWorker({ once = false, signal: externalSignal } = {}) {
       });
     }
   } finally {
-    await remote?.close().catch(() => {});
-    await unlock();
+    try { await mcp.close(); }
+    finally {
+      await remote?.close().catch(() => {});
+      await unlock();
+    }
   }
 }
 

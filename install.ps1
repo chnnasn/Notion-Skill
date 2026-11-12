@@ -71,9 +71,9 @@ try {
         if (!(Test-Path -LiteralPath $configFile)) { Invoke-NodeStep (@('src/setup.js') + $Roots) }
         Invoke-NodeStep @('src/login.js')
         Invoke-NodeStep @('src/install.js')
-        Invoke-NodeStep @('src/launcher.js', 'shortcut')
+        Invoke-NodeStep @('src/launcher.js', 'configure')
         Invoke-NodeStep @('src/launcher.js', 'open')
-        Write-Host 'Setup complete. Open the new Notion desktop shortcut for future sessions.'
+        Write-Host 'Setup complete. The receiver is online for this Windows session. Use the Skill in Notion to control MCP.'
     } finally { Pop-Location }
 } catch {
     Write-Error $_ -ErrorAction Continue
