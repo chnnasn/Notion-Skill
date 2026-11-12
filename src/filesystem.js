@@ -8,9 +8,19 @@ export class FileAccessError extends Error {
   }
 }
 
-function isWithin(root, target) {
+export function isWithin(root, target) {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+export function validatePath(input) {
+  if (input.includes('\0')) {
+    throw new FileAccessError('INVALID_PATH', '路径包含无效字符。');
+  }
+  // Reject Win32 device namespaces and alternate data streams before filesystem access.
+  if (process.platform === 'win32' && (/^[\\/]{2}[?.][\\/]/.test(input) || input.replace(/^[a-z]:/i, '').includes(':'))) {
+    throw new FileAccessError('INVALID_PATH', '请使用普通文件路径。');
+  }
 }
 
 function fileType(info) {
@@ -27,13 +37,7 @@ export class LocalFiles {
   }
 
   async resolve(input = '.') {
-    if (input.includes('\0')) {
-      throw new FileAccessError('INVALID_PATH', '路径包含无效字符。');
-    }
-    // Reject Win32 device namespaces and alternate data streams before filesystem access.
-    if (process.platform === 'win32' && (/^[\\/]{2}[?.][\\/]/.test(input) || input.replace(/^[a-z]:/i, '').includes(':'))) {
-      throw new FileAccessError('INVALID_PATH', '请使用普通文件路径。');
-    }
+    validatePath(input);
     const requested = path.resolve(this.roots[0], input);
     if (!this.roots.some((root) => isWithin(root, requested))) {
       throw new FileAccessError('ACCESS_DENIED', '路径超出配置的 roots。请先调用 list_roots。');

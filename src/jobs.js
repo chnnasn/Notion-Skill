@@ -17,9 +17,13 @@ export const requestSchema = z.discriminatedUnion('tool', [
     tool: z.literal('mcp_control'),
     arguments: z.object({ action: z.enum(['start', 'stop', 'status', 'auto']) }).strict(),
   }).strict(),
+  requestBase.extend({
+    tool: z.literal('allow_path'),
+    arguments: z.object({ path: z.string().min(1).max(4096) }).strict(),
+  }).strict(),
 ]);
 
-const actionTools = new Set(['ensure_app', 'open_path']);
+const actionTools = new Set(['ensure_app', 'open_path', 'allow_path']);
 
 export class JobRunner {
   constructor({ queue, client, deviceId, journalDirectory }) {

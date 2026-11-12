@@ -2,7 +2,8 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { loadConfig } from './config.js';
+import { allowPath, loadConfig } from './config.js';
+import { FileAccessError } from './filesystem.js';
 import { connectNotion } from './notion-auth.js';
 import { NotionQueue } from './notion-queue.js';
 import { JobRunner } from './jobs.js';
@@ -99,6 +100,18 @@ export class McpController {
     if (this.state.mcpMode === 'off') {
       const result = { code: 'MCP_DISABLED', message: 'MCP 已手动关闭。请在 Notion 中开启 MCP，或恢复按需启动后新建任务。' };
       return { isError: true, structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (request.name === 'allow_path') {
+      let result;
+      try { result = await allowPath(this.config, request.arguments.path); }
+      catch (error) {
+        if (!(error instanceof FileAccessError) && !['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'ELOOP'].includes(error.code)) throw error;
+        result = { code: error.code, message: error.message };
+        return { isError: true, structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
+      }
+      await this.close();
+      if (this.state.mcpMode === 'on') await this.start();
+      return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     await this.start();
     return this.local.client.callTool(request);
