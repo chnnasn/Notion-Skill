@@ -1,6 +1,6 @@
 # Notion Local Computer
 
-在 Notion 聊天中使用 Skill，根据任务增加目录访问范围、浏览本机目录、查询路径、读取文件，并按需打开文件、文件夹和已配置的程序。也可以在 Notion 中手动开启、关闭 MCP 或查看状态。本机接收器以 Node.js 脚本运行，通过登录后的 Notion 账户主动领取任务，再将执行结果写回任务页。
+在 Notion 聊天中使用 Skill，浏览本机全部磁盘、读取文件、执行 PowerShell 或 CMD 命令，并按需打开文件和已配置的程序。也可以在 Notion 中手动开启、关闭 MCP 或查看状态。本机接收器以 Node.js 脚本运行，通过登录后的 Notion 账户主动领取任务，再将执行结果写回任务页。
 
 ```text
 Notion Agent → Skill 创建任务页
@@ -24,7 +24,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 安装脚本完成依赖准备、本机配置、浏览器登录授权、Skill 安装，随后启动接收器并打开 Notion。已有 Node.js 22.16 或更新版本时直接使用，否则从 Node.js 官网下载便携运行时并核对 SHA-256，支持 Windows x64 和 ARM64。运行时保存在程序目录中。
 
-首次配置默认开放程序所在目录，并加入记事本。后续访问其他位置时，直接在 Notion 中提出任务，由 Skill 添加所需目录。也可以在首次安装时指定基础目录，将下面的示例路径换为实际存在的目录。
+首次配置默认开启全电脑访问模式，并加入记事本。直接在 Notion 中提出“读取 E 盘的 Github 目录”或“查找桌面上的文件”，即可按当前 Windows 账户权限访问对应位置。希望限定访问目录时，在首次安装时传入 `-Roots`，将下面的示例路径换为实际存在的目录。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Roots "D:\Documents"
@@ -43,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Roots "D:\Doc
 | 指令 | 效果 |
 | --- | --- |
 | 开启 MCP | 进入 `on` 模式，MCP 在本次接收器会话中保持运行 |
-| 关闭 MCP | 进入 `off` 模式，关闭 MCP，后续文件与应用任务返回 `MCP_DISABLED` |
+| 关闭 MCP | 进入 `off` 模式，关闭 MCP，后续文件、命令与应用任务返回 `MCP_DISABLED` |
 | 查看 MCP 状态 | 返回模式、实际运行状态、进程 ID 和查询时间 |
 | 恢复按需启动 | 进入 `auto` 模式，后续任务按批次启动和关闭 MCP |
 
@@ -57,19 +57,56 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Roots "D:\Doc
 powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Start
 ```
 
-例如可以说“列出这台电脑允许访问的目录”“读取当前项目的 README.md 并总结”“在资源管理器中打开当前项目”或“需要时启动记事本并打开 README.md”。
+例如可以说“列出这台电脑的磁盘”“读取 E 盘 Github 目录并总结其中的项目”“读取桌面上的文件”“在资源管理器中打开当前项目”或“需要时启动记事本并打开 README.md”。
 
 客户端连接的是 Notion 官方托管 MCP，本机任务通过按需启动的 stdio MCP 执行。登录流程和自动选择 Skill 的能力见官方说明。[Notion MCP 客户端接入](https://developers.notion.com/guides/mcp/build-mcp-client) · [Notion Skills](https://www.notion.com/help/create-and-manage-skills)
 
-## 按任务增加访问目录
+## 全电脑访问
 
-在 Notion 中直接提出“读取 `D:\资料\报告.md`”或“查看 `E:\Projects` 中的项目”。Skill 会根据任务使用 `allow_path` 增加需要的访问范围，然后继续读取、搜索或打开目标。
+`accessMode` 为 `all` 时，直接在 Notion 中提出“读取 `D:\资料\报告.md`”或“查看 `E:\Github` 中的项目”。Skill 使用目标的绝对路径浏览、搜索、读取或打开文件。新接入的磁盘和当前账户可访问的共享路径也可以直接使用。
 
-指定文件会授权其所在目录，指定目录会授权该目录。工具校验路径存在并返回真实路径，后续操作使用返回的 `path`。新增目录保存在 `.runtime/access.json`，后续启动时自动加载。已授权目录和配置中的基础目录一起出现在 `list_roots` 结果中。
+`list_roots` 返回 `access_mode="all"`、当前磁盘列表 `roots`，以及相对路径基准 `relative_path_base`。`locations` 字段返回系统实际的桌面、下载、文档和用户目录路径，支持已移动到其他磁盘的位置。名称无匹配时会缩短关键词或列出目录核对，找到文件夹后继续列出其中的文件。
 
-授权结果中的 `status` 为 `allowed` 时，`added_root` 给出本次新增的目录。`already_allowed` 表示该路径已有访问权限，可以继续执行原任务。在 Notion 中提出“列出当前允许访问的目录”，即可检查完整范围。
+文件工具使用接收器所属的 Windows 账户权限。系统权限错误返回 `EACCES` 或 `EPERM`，文件工具保护客户端自身配置和 `.runtime` 目录。搜索会返回深度和数量限制信息，全电脑查找时按磁盘和相关子目录分批搜索。
 
-授权由当前接收器处理，运行中的 MCP 会重新加载访问范围。手动关闭模式下，先在 Notion 开启 MCP 或恢复按需模式，再提交授权与文件任务。需要移除已保存的授权时，可以编辑 `.runtime/access.json` 的 `roots` 数组，然后重新启动接收器。
+### 已有安装切换到全电脑模式
+
+在 `.notion-local-mcp.json` 中加入或修改 `"accessMode": "all"`，保留其他配置，然后停止接收器、更新 Skill 并启动接收器。下面的命令使用安装脚本保存的 Node.js 路径。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Stop
+$notionNode = (Get-Content -Raw .\.runtime\launcher.json | ConvertFrom-Json).nodeExecutable
+& $notionNode .\src\install.js
+powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Start
+```
+
+在 Notion 新建聊天并选择 `Notion-skill`，让会话加载更新后的说明。查询磁盘时确认结果中的 `access_mode` 为 `all`。旧任务页保留当时的执行结果，新操作创建新任务页。
+
+### 限定目录模式
+
+`accessMode` 为 `restricted` 或旧配置省略该字段时，基础访问范围由 `roots` 指定。Skill 可以根据用户任务调用 `allow_path` 增加所需目录。文件路径授权其所在目录，目录路径授权该目录，返回的 `path` 为真实路径。新增范围保存在 `.runtime/access.json`，接收器会重新加载 MCP。`allowed` 表示新增成功，`already_allowed` 表示已有访问权限。
+
+手动关闭模式下，先在 Notion 开启 MCP 或恢复按需模式，再提交文件任务。全电脑模式兼容旧的 `allow_path` 任务，返回 `already_allowed`。需要移除限定模式的授权时，编辑 `.runtime/access.json` 的 `roots` 数组并重启接收器。
+
+## 在 Notion 中执行命令
+
+可以直接提出“在 `E:\Github\Notion-Skill` 运行 `git status --short`”“执行 Python 脚本并告诉我结果”或“运行项目测试，超时设为 5 分钟”。Skill 会创建 `run_command` 任务，接收器按当前 MCP 模式执行，并将输出和退出码写回任务页。
+
+| 参数 | 默认值与用途 |
+| --- | --- |
+| `command` | 要执行的命令，最长 8000 字符，PowerShell 支持多行脚本 |
+| `shell` | 默认 `powershell`，也支持 `cmd` |
+| `cwd` | 默认 `.`，相对路径基准为配置中的第一个目录 |
+| `timeout_ms` | 默认 60000，支持 1000 到 600000 毫秒 |
+| `max_output_bytes` | 默认 8192，支持 256 到 8192，限制两路输出的总字节数 |
+
+每次调用启动独立的非交互 shell，在后台执行。结果包含 `stdout`、`stderr`、`exit_code`、`status`、`duration_ms`、`timed_out` 和 `truncated`。退出码为 0 时返回 `completed`，非零为 `failed`。超时和取消会尝试终止命令进程树，并返回已有输出。`termination_error` 表示终止失败，`truncated` 表示输出被截断。完整日志可以由命令重定向到文件后分块读取。
+
+命令使用接收器所属账户的完整操作系统权限，可以修改文件、启动程序及访问网络。文件工具的目录限制和凭据保护作用于文件工具，`run_command.cwd` 也接受路径校验。命令执行中的路径访问由 Windows 账户权限决定。Skill 按用户任务生成命令并回报实际结果。
+
+命令继承接收器环境，并将当前 Node.js 运行时目录加入 PATH，便携安装也可调用 Node.js 和 npm。默认 PowerShell 使用 UTF-8 输出并加载独立会话。CMD 通过临时 UTF-8 批处理执行，结束后清理脚本，批处理中调用另一个批处理并继续后续命令时使用 `call`。其他程序的输出编码取决于该程序配置。交互式登录或持续运行的终端会话由对应应用完成。
+
+更新已有安装时，使用上文的停止接收器、运行 `src/install.js`、启动接收器步骤，同步更新 Notion Skill，再新建聊天加载命令工具说明。
 
 ## 在新电脑上使用
 
@@ -99,7 +136,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Stop
 
 配置文件为 `.notion-local-mcp.json`。修改后重新启动客户端。
 
-- `roots` 设置基础访问目录，相对路径从第一个目录解析。Skill 根据任务追加的目录保存在 `.runtime/access.json`。
+- `accessMode` 为 `all` 时开启全电脑访问，为 `restricted` 时启用限定目录。新安装默认 `all`，旧配置省略该字段时使用 `restricted`。
+- `roots` 的第一个目录作为相对路径基准。限定模式下，该数组和 `.runtime/access.json` 共同确定可访问范围。全电脑模式按操作系统账户权限访问路径。
 - `desktop.enabled` 控制桌面工具是否可用。
 - `desktop.apps` 将短名称映射到实际 `.exe` 路径。`ensure_app` 与 `open_path.app` 使用这些名称。
 - 应用使用 Windows 商店启动别名时，可通过 `packageName` 识别对应安装包中的实际进程。
@@ -125,17 +163,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Stop
 
 | 工具 | 用途 |
 | --- | --- |
-| `list_roots` | 列出允许目录和相对路径基准 |
-| `allow_path` | 根据任务授权文件所在目录或指定目录，由接收器处理 |
+| `list_roots` | 返回访问模式、磁盘或限定目录、相对路径基准及系统位置 |
+| `allow_path` | 兼容限定目录模式的目录授权，由接收器处理 |
 | `list_directory` | 分页列出文件和子目录 |
 | `get_path_info` | 查询真实路径、类型、大小和时间 |
 | `search_files` | 递归按文件名子串搜索 |
 | `read_file` | 分块读取 UTF-8、UTF-16 LE 或 Base64 字节 |
+| `run_command` | 执行 PowerShell 或 CMD 命令，回传输出、退出码与超时状态 |
 | `list_apps` | 获取已配置应用及当前会话中的进程 |
 | `ensure_app` | 检查应用状态，按需启动 |
 | `open_path` | 打开文件或目录，或在资源管理器中定位 |
 
-路径校验覆盖 `..`、根目录前缀混淆、符号链接与 Windows junction、设备路径及备用数据流。读取前后核对实际文件。目录分页与文件分块使用返回的 `next_offset`。
+全电脑模式支持跨目录、跨磁盘及符号链接的普通路径。限定模式会校验路径及链接目标所属的目录范围。两种模式均校验设备路径和备用数据流，并在读取前后核对实际文件。目录分页与文件分块使用返回的 `next_offset`。
 
 文本读取适用于 Markdown、TXT、JSON、CSV 和源码。PDF、Office 等二进制文件可读取原始字节，正文提取需要相应的解析能力。每个 Notion 任务最多回传 80,000 字节 JSON，超过时缩小读取长度或结果数量。
 
@@ -149,7 +188,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Stop
 
 任务状态依次为 `pending`、`running`，最后进入 `succeeded`、`failed` 或 `review`。结果保存在 `NLCRESULTBEGIN` 和 `NLCRESULTEND` 之间。业务页面内容由 Skill 根据用户要求单独更新。
 
-客户端通过 Windows 命名管道互斥，防止同一配置同时运行多个执行进程。每个任务执行前后写入本地记录，结果回传失败时复用已保存结果。打开文件、启动应用、增加目录授权或切换 MCP 模式过程中客户端中断时，该任务标记为 `review`，需要检查实际电脑状态后决定是否创建新任务。新操作使用新任务页。
+客户端通过 Windows 命名管道互斥，防止同一配置同时运行多个执行进程。每个任务执行前后写入本地记录，结果回传失败时复用已保存结果。执行命令、打开文件、启动应用、增加目录授权或切换 MCP 模式过程中客户端中断时，该任务标记为 `review`，需要检查实际电脑状态后决定是否创建新任务。失败或超时的命令可能已产生部分修改，后续操作依据输出与实际状态决定。新操作使用新任务页。
 
 搜索索引和网络响应会影响发现任务的时间。每次搜索最多获取 50 条匹配结果，后续轮次继续处理。客户端断线后自动重连，重试间隔最多 60 秒。
 
@@ -161,7 +200,7 @@ npm run verify
 npm run client -- --once
 ```
 
-`npm test` 覆盖文件读取、分页、路径权限、按任务授权目录与即时加载、HTTP MCP、桌面操作分发、MCP 手动开关与按需恢复、任务恢复、Notion Markdown 转义、互斥和凭据加密。
+`npm test` 覆盖全电脑访问、限定模式兼容、文件读取、分页、路径权限、按任务授权目录与即时加载、HTTP 和 stdio MCP、PowerShell 与 CMD 命令、中文输出、退出码、超时进程树终止、取消、截断、桌面操作分发、MCP 手动开关与按需恢复、任务恢复、Notion Markdown 转义、互斥和凭据加密。
 
 `npm run verify` 使用真实登录创建私有验证任务，确认客户端能搜索到任务、通过本机 MCP 获取允许目录，并把一致的结果保存回 Notion。验证页面会保留供检查。`client -- --once` 执行一轮实际任务查询。
 

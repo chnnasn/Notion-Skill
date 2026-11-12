@@ -6,6 +6,39 @@ import { test } from 'node:test';
 import { allowPath, loadConfig } from '../src/config.js';
 import { LocalFiles } from '../src/filesystem.js';
 
+test('all access ignores old root restrictions and grants while protecting service configuration', async (t) => {
+  const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'notion-all-access-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runtime = path.join(directory, '.runtime');
+  await mkdir(runtime);
+  const configFile = path.join(directory, 'config.json');
+  const root = path.join(directory, 'old-unavailable-root');
+  await writeFile(configFile, JSON.stringify({
+    accessMode: 'all', roots: [root], token: 'test-only-token-01234567890123456789',
+  }));
+  const grants = path.join(runtime, 'access.json');
+  await writeFile(grants, 'old-invalid-grants');
+  const config = await loadConfig({ NOTION_MCP_CONFIG: configFile });
+  assert.equal(config.accessMode, 'all');
+  assert.deepEqual(config.roots, [root]);
+  const target = path.join(directory, 'report.md');
+  await writeFile(target, '全电脑访问');
+  const files = new LocalFiles(config.roots, [configFile, runtime], config.accessMode);
+  assert.equal((await files.readFile(target, 0, 100, 'utf8')).content, '全电脑访问');
+  assert.equal((await files.readFile('../report.md', 0, 100, 'utf8')).content, '全电脑访问');
+  const hardlink = path.join(directory, 'config-hardlink');
+  await link(configFile, hardlink);
+  for (const protectedPath of [configFile, hardlink, grants]) {
+    await assert.rejects(files.resolve(protectedPath), { code: 'ACCESS_DENIED' });
+    await assert.rejects(allowPath(config, protectedPath), { code: 'ACCESS_DENIED' });
+  }
+  const allowed = await allowPath(config, target);
+  assert.equal(allowed.status, 'already_allowed');
+  assert.equal(allowed.access_mode, 'all');
+  assert.equal(allowed.added_root, null);
+  assert.equal(await readFile(grants, 'utf8'), 'old-invalid-grants');
+});
+
 test('task-based directory grants persist canonical paths and retain configuration protections', async (t) => {
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'notion-access-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -24,6 +57,7 @@ test('task-based directory grants persist canonical paths and retain configurati
   const alias = path.join(directory, 'alias');
   await symlink(outside, alias, process.platform === 'win32' ? 'junction' : 'dir');
   const config = await loadConfig({ NOTION_MCP_CONFIG: configFile });
+  assert.equal(config.accessMode, 'restricted');
   await assert.rejects(new LocalFiles(config.roots).resolve(target), { code: 'ACCESS_DENIED' });
 
   const allowed = await allowPath(config, path.join(alias, 'report.md'));

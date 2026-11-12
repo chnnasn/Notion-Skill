@@ -57,6 +57,12 @@ test('orphan running actions require review while read operations can recover', 
   assert.equal(job.status, 'review');
   assert.equal(calls, 0);
   job.status = 'running';
+  job.request.tool = 'run_command';
+  job.request.arguments = { command: 'Write-Output recovered' };
+  await runner.run(randomUUID());
+  assert.equal(job.status, 'review');
+  assert.equal(calls, 0);
+  job.status = 'running';
   job.request.tool = 'list_roots';
   job.request.arguments = {};
   await runner.run(randomUUID());
@@ -66,6 +72,35 @@ test('orphan running actions require review while read operations can recover', 
   job.request.deviceId = randomUUID();
   await runner.run(randomUUID());
   assert.equal(calls, 1);
+});
+
+test('command output publishing retries reuse the result without repeating execution', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'notion-command-journal-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const deviceId = randomUUID();
+  const job = { status: 'pending', request: { version: 1, deviceId, tool: 'run_command', arguments: { command: 'Write-Output test' } } };
+  let calls = 0;
+  let publishFailed = false;
+  const queue = {
+    async readJob() { return structuredClone(job); },
+    async markRunning() { job.status = 'running'; },
+    async finish(id, status, result) {
+      if (!publishFailed) { publishFailed = true; throw new Error('publishing failed'); }
+      Object.assign(job, { status, result });
+    },
+  };
+  const client = { async callTool() {
+    calls++;
+    return { isError: true, structuredContent: { status: 'failed', exit_code: 7, stdout: 'partial output', stderr: 'failure' } };
+  } };
+  const runner = new JobRunner({ queue, client, deviceId, journalDirectory: directory });
+  const id = randomUUID();
+  await assert.rejects(runner.run(id), /publishing failed/);
+  await runner.run(id);
+  assert.equal(calls, 1);
+  assert.equal(job.status, 'failed');
+  assert.equal(job.result.stdout, 'partial output');
+  assert.equal(job.result.exit_code, 7);
 });
 
 test('client lock prevents simultaneous workers and OAuth state is validated', { skip: process.platform !== 'win32' }, async (t) => {

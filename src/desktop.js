@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
+import os from 'node:os';
 import { promisify } from 'node:util';
 import { FileAccessError } from './filesystem.js';
 
@@ -19,6 +20,35 @@ async function powershell(script, variables = {}) {
 }
 
 export const windowsDesktop = {
+  async drives() {
+    if (process.platform !== 'win32') return ['/'];
+    const output = await powershell(`
+      $ErrorActionPreference = 'Stop'
+      [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+      ConvertTo-Json -InputObject @([Environment]::GetLogicalDrives()) -Compress
+    `);
+    return JSON.parse(output);
+  },
+
+  async locations() {
+    if (process.platform !== 'win32') return { home: os.homedir() };
+    const output = await powershell(`
+      $ErrorActionPreference = 'Stop'
+      [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+      $locations = [ordered]@{
+        desktop = [Environment]::GetFolderPath('DesktopDirectory')
+        documents = [Environment]::GetFolderPath('MyDocuments')
+        home = [Environment]::GetFolderPath('UserProfile')
+      }
+      try {
+        $downloads = (New-Object -ComObject Shell.Application).Namespace('shell:Downloads')
+        if ($downloads) { $locations['downloads'] = $downloads.Self.Path }
+      } catch { }
+      $locations | ConvertTo-Json -Compress
+    `);
+    return Object.fromEntries(Object.entries(JSON.parse(output)).filter(([, value]) => value && path.isAbsolute(value)));
+  },
+
   async openNotion() {
     await powershell(`
       $ErrorActionPreference = 'Stop'

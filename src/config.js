@@ -7,6 +7,7 @@ import { readJson, saveJson } from './storage.js';
 export const CONFIG_FILENAME = '.notion-local-mcp.json';
 
 const configSchema = z.object({
+  accessMode: z.enum(['all', 'restricted']).default('restricted'),
   roots: z.array(z.string().min(1)).min(1),
   token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/),
   port: z.number().int().min(1).max(65535).default(3210),
@@ -57,6 +58,12 @@ export async function allowPath(config, input) {
   const runtime = path.join(path.dirname(config.configFile), '.runtime');
   const files = new LocalFiles([directory], [config.configFile, runtime]);
   await files.resolve(resolved);
+  if (config.accessMode === 'all') {
+    return {
+      status: 'already_allowed', access_mode: 'all', path: resolved,
+      added_root: null, relative_path_base: config.roots[0], persistent: true,
+    };
+  }
   const filename = path.join(runtime, 'access.json');
   const grants = await readGrants(filename);
   const currentRoots = [...new Set([...config.roots, ...grants.roots])];
@@ -106,9 +113,14 @@ export async function loadConfig(env = process.env) {
     config.publicUrl = url.origin;
   }
   const canonicalFilename = await realpath(filename);
-  const grants = await readGrants(path.join(path.dirname(canonicalFilename), '.runtime', 'access.json'));
+  const grants = config.accessMode === 'all'
+    ? { roots: [] }
+    : await readGrants(path.join(path.dirname(canonicalFilename), '.runtime', 'access.json'));
   const baseRoots = await Promise.all(config.roots.map(async (root) => {
-    const absolute = await realpath(path.resolve(path.dirname(filename), root));
+    const requested = path.resolve(path.dirname(filename), root);
+    validatePath(requested);
+    if (config.accessMode === 'all') return requested;
+    const absolute = await realpath(requested);
     if (!(await stat(absolute)).isDirectory()) {
       throw new Error(`roots 必须指向目录，当前值为 ${root}`);
     }

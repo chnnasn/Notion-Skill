@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -51,7 +51,7 @@ test('desktop tools preserve path boundaries, expose actions, and coalesce concu
     requestInit: { headers: { Authorization: `Bearer ${config.token}` } },
   }));
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 8);
+  assert.equal(tools.length, 9);
   assert.equal(tools.find((tool) => tool.name === 'list_apps').annotations.readOnlyHint, true);
   assert.equal(tools.find((tool) => tool.name === 'open_path').annotations.readOnlyHint, false);
   const invoke = (name, args) => client.callTool({ name, arguments: args });
@@ -83,4 +83,19 @@ test('desktop tools preserve path boundaries, expose actions, and coalesce concu
 test('Windows process inspection returns the current Node process in this session', { skip: process.platform !== 'win32' }, async () => {
   const processes = await windowsDesktop.processes();
   assert.ok(processes.some((item) => item.ProcessId === process.pid && path.relative(item.ExecutablePath, process.execPath) === ''));
+});
+
+test('Windows locations resolve real special folders including redirected Desktop and Downloads', { skip: process.platform !== 'win32' }, async () => {
+  const locations = await windowsDesktop.locations();
+  assert.equal(locations.home.toLowerCase(), os.homedir().toLowerCase());
+  assert.ok(path.isAbsolute(locations.desktop));
+  assert.ok((await stat(locations.desktop)).isDirectory());
+  for (const location of Object.values(locations)) assert.ok(path.isAbsolute(location));
+});
+
+test('drive discovery returns filesystem roots including the current system drive', async () => {
+  const drives = await windowsDesktop.drives();
+  assert.ok(Array.isArray(drives));
+  assert.ok(drives.includes(path.parse(process.cwd()).root));
+  assert.ok(drives.every((drive) => path.isAbsolute(drive) && path.parse(drive).root === drive));
 });

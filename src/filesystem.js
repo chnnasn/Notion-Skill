@@ -31,19 +31,20 @@ function fileType(info) {
 }
 
 export class LocalFiles {
-  constructor(roots, protectedFiles = []) {
+  constructor(roots, protectedFiles = [], accessMode = 'restricted') {
     this.roots = roots;
     this.protectedFiles = protectedFiles;
+    this.accessMode = accessMode;
   }
 
   async resolve(input = '.') {
     validatePath(input);
     const requested = path.resolve(this.roots[0], input);
-    if (!this.roots.some((root) => isWithin(root, requested))) {
+    if (this.accessMode !== 'all' && !this.roots.some((root) => isWithin(root, requested))) {
       throw new FileAccessError('ACCESS_DENIED', '路径超出配置的 roots。请先调用 list_roots。');
     }
     const resolved = await realpath(requested);
-    if (!this.roots.some((root) => isWithin(root, resolved))) {
+    if (this.accessMode !== 'all' && !this.roots.some((root) => isWithin(root, resolved))) {
       throw new FileAccessError('ACCESS_DENIED', '链接目标超出配置的 roots。');
     }
     if (this.protectedFiles.some((filename) => isWithin(filename, resolved))) {

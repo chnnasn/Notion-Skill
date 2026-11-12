@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -63,6 +63,55 @@ test('on-demand stdio MCP reads a file and its process exits after the batch', a
   assert.equal(result.structuredContent.content, '按需启动测试');
   await local.close();
   assert.throws(() => process.kill(local.pid, 0), { code: 'ESRCH' });
+});
+
+test('queued full-computer reads start stdio MCP with all access and no directory grant', async (t) => {
+  const controls = await queuedControls(t);
+  const filename = controls.config.configFile;
+  const raw = JSON.parse(await readFile(filename, 'utf8'));
+  await writeFile(filename, JSON.stringify({ ...raw, accessMode: 'all' }));
+  Object.assign(controls.config, await loadConfig({ NOTION_MCP_CONFIG: filename }));
+  const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), 'notion-full-read-')));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  const target = path.join(outside, 'report.md');
+  await writeFile(target, '直接读取其他目录');
+  const result = await controls.run(controls.create('read_file', { path: target }));
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.result.content, '直接读取其他目录');
+  assert.equal(controls.state.mcpPid, null);
+  assert.equal(controls.state.phase, 'waiting');
+  const roots = await controls.run(controls.create('list_roots', {}));
+  assert.equal(roots.result.access_mode, 'all');
+  assert.ok(roots.result.roots.includes(path.parse(outside).root));
+  await assert.rejects(readFile(path.join(path.dirname(filename), '.runtime', 'access.json')), { code: 'ENOENT' });
+});
+
+test('queued commands execute through stdio and respect manual off mode', { skip: process.platform !== 'win32' }, async (t) => {
+  const controls = await queuedControls(t);
+  const args = { command: 'Set-Content -LiteralPath result.txt -Value "命令已执行" -Encoding UTF8\nWrite-Output "完成"', cwd: controls.config.roots[0] };
+  const job = await controls.run(controls.create('run_command', args));
+  assert.equal(job.status, 'succeeded');
+  assert.equal(job.result.stdout.trim(), '完成');
+  assert.ok((await readFile(path.join(args.cwd, 'result.txt'), 'utf8')).includes('命令已执行'));
+  assert.equal(controls.state.mcpPid, null);
+  await controls.run(controls.create('mcp_control', { action: 'stop' }));
+  const blocked = await controls.run(controls.create('run_command', args));
+  assert.equal(blocked.result.code, 'MCP_DISABLED');
+});
+
+test('command MCP transport timeout includes the requested runtime and cleanup time', async (t) => {
+  let options;
+  const controls = await queuedControls(t, async () => ({
+    pid: 12345,
+    client: { async callTool(request, schema, requestOptions) {
+      options = requestOptions;
+      return { structuredContent: { status: 'completed', stdout: 'done', exit_code: 0 } };
+    } },
+    async close() {},
+  }));
+  const job = await controls.run(controls.create('run_command', { command: 'Write-Output done', timeout_ms: 120_000 }));
+  assert.equal(job.status, 'succeeded');
+  assert.equal(options.timeout, 135_000);
 });
 
 test('desktop launcher reuses the receiver and can stop it without starting MCP', { skip: process.platform !== 'win32' }, async (t) => {

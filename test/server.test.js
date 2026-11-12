@@ -86,12 +86,29 @@ after(async () => {
   if (temp) await rm(temp, { recursive: true, force: true });
 });
 
-test('official MCP client initializes and discovers the five read tools', async () => {
+test('official MCP client discovers read tools and a command action with accurate annotations', async () => {
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((tool) => tool.name).sort(), ['get_path_info', 'list_directory', 'list_roots', 'read_file', 'search_files']);
-  assert.ok(tools.every((tool) => tool.annotations.readOnlyHint));
+  assert.deepEqual(tools.map((tool) => tool.name).sort(), ['get_path_info', 'list_directory', 'list_roots', 'read_file', 'run_command', 'search_files']);
+  assert.ok(tools.filter((tool) => tool.name !== 'run_command').every((tool) => tool.annotations.readOnlyHint));
+  assert.equal(tools.find((tool) => tool.name === 'run_command').annotations.destructiveHint, true);
   const { value } = await call('list_roots');
+  assert.equal(value.access_mode, 'restricted');
   assert.deepEqual(value.roots, [root]);
+  assert.equal(typeof value.locations, 'object');
+  assert.ok(path.isAbsolute(value.locations.home));
+  if (process.platform === 'win32') assert.ok(path.isAbsolute(value.locations.desktop));
+});
+
+test('HTTP command execution returns failure details and validates arguments', { skip: process.platform !== 'win32' }, async () => {
+  const success = await call('run_command', { command: 'Write-Output "HTTP命令"', cwd: root });
+  assert.ok(!success.response.isError);
+  assert.equal(success.value.stdout.trim(), 'HTTP命令');
+  const failure = await call('run_command', { command: '[Console]::Error.WriteLine("失败详情"); exit 9', cwd: root });
+  assert.equal(failure.response.isError, true);
+  assert.equal(failure.value.exit_code, 9);
+  assert.equal(failure.value.stderr.trim(), '失败详情');
+  const invalid = await client.callTool({ name: 'run_command', arguments: { command: 'Write-Output never', timeout_ms: -1 } });
+  assert.equal(invalid.isError, true);
 });
 
 test('directory pagination, Chinese paths, path metadata, and search work over HTTP', async () => {
@@ -145,6 +162,40 @@ test('directory traversal, sibling prefixes, external junctions, and config hard
   }
   const allowed = await call('read_file', { path: 'inside-link/report.md' });
   assert.equal(allowed.value.content, '# Report\nLocal file content');
+});
+
+test('all access works through HTTP for external directories, files, and junctions', async (t) => {
+  const fullServer = createHttpServer({ ...config, accessMode: 'all' });
+  fullServer.listen(0, '127.0.0.1');
+  await once(fullServer, 'listening');
+  const fullClient = new Client({ name: 'all-access-test', version: '1' });
+  t.after(async () => {
+    await fullClient.close();
+    fullServer.closeAllConnections();
+    await new Promise((resolve) => fullServer.close(resolve));
+  });
+  await fullClient.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${fullServer.address().port}/mcp`), {
+    requestInit: { headers: { Authorization: `Bearer ${token}` } },
+  }));
+  const invoke = (name, args = {}) => fullClient.callTool({ name, arguments: args });
+  const roots = await invoke('list_roots');
+  assert.equal(roots.structuredContent.access_mode, 'all');
+  assert.equal(roots.structuredContent.relative_path_base, root);
+  assert.ok(roots.structuredContent.roots.includes(path.parse(outside).root));
+  for (const filename of [path.join(outside, 'secret.txt'), '../allowed-other/secret.txt', 'outside-link/secret.txt']) {
+    assert.equal((await invoke('read_file', { path: filename })).structuredContent.content, 'outside secret');
+  }
+  const listing = await invoke('list_directory', { path: outside });
+  assert.ok(listing.structuredContent.entries.some((entry) => entry.name === 'secret.txt'));
+  const search = await invoke('search_files', { path: outside, query: 'secret' });
+  assert.equal(search.structuredContent.results[0].path, path.join(outside, 'secret.txt'));
+  const info = await invoke('get_path_info', { path: outside });
+  assert.equal(info.structuredContent.type, 'directory');
+  for (const filename of [configFile, 'config-hardlink']) {
+    const protectedResult = await invoke('read_file', { path: filename });
+    assert.equal(protectedResult.isError, true);
+    assert.equal(JSON.parse(protectedResult.content[0].text).code, 'ACCESS_DENIED');
+  }
 });
 
 test('Windows device paths and alternate data streams are rejected', { skip: process.platform !== 'win32' }, async () => {
@@ -221,6 +272,7 @@ test('setup CLI creates a usable config, protects existing configs, and supports
   assert.equal(await readFile(generated, 'utf8'), before);
   const loaded = await loadConfig(env);
   assert.equal(loaded.token.length, 43);
+  assert.equal(loaded.accessMode, 'restricted');
   assert.deepEqual(loaded.roots, [root]);
   await writeFile(generated, JSON.stringify({ roots: ['allowed'], token }));
   assert.deepEqual((await loadConfig(env)).roots, [root]);
@@ -228,6 +280,14 @@ test('setup CLI creates a usable config, protects existing configs, and supports
   await assert.rejects(loadConfig(env), /token/);
   await writeFile(generated, JSON.stringify({ roots: [root], token, publicUrl: 'http://example.com' }));
   await assert.rejects(loadConfig(env), /HTTPS/);
+});
+
+test('setup without roots defaults to all access and retains a relative path base', async () => {
+  const env = { NOTION_MCP_CONFIG: path.join(temp, 'setup-all.json') };
+  assert.equal((await runScript('setup.js', [], env)).code, 0);
+  const generated = await loadConfig(env);
+  assert.equal(generated.accessMode, 'all');
+  assert.deepEqual(generated.roots, [await realpath(project)]);
 });
 
 test('normal server CLI starts from config and accepts an actual MCP client', async (t) => {

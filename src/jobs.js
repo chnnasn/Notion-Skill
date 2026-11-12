@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { readJson, saveJson } from './storage.js';
+import { commandSchema } from './commands.js';
 
 const requestBase = z.object({
   version: z.literal(1),
@@ -21,9 +22,13 @@ export const requestSchema = z.discriminatedUnion('tool', [
     tool: z.literal('allow_path'),
     arguments: z.object({ path: z.string().min(1).max(4096) }).strict(),
   }).strict(),
+  requestBase.extend({
+    tool: z.literal('run_command'),
+    arguments: commandSchema,
+  }).strict(),
 ]);
 
-const actionTools = new Set(['ensure_app', 'open_path', 'allow_path']);
+const actionTools = new Set(['ensure_app', 'open_path', 'allow_path', 'run_command']);
 
 export class JobRunner {
   constructor({ queue, client, deviceId, journalDirectory }) {

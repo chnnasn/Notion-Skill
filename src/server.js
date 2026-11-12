@@ -17,7 +17,9 @@ function json(response, status, value, headers = {}) {
   response.end(JSON.stringify(value));
 }
 
-export function createHttpServer(config, desktop = new DesktopControl(config, new LocalFiles(config.roots, [config.configFile, path.join(path.dirname(config.configFile), '.runtime')]))) {
+export function createHttpServer(config, desktop = new DesktopControl(config, new LocalFiles(
+  config.roots, [config.configFile, path.join(path.dirname(config.configFile), '.runtime')], config.accessMode,
+))) {
   const expectedToken = digest(`Bearer ${config.token}`);
   const publicHost = config.publicUrl ? new URL(config.publicUrl).host : null;
   const origins = new Set([
@@ -83,7 +85,9 @@ async function main() {
     http.listen(config.port, '127.0.0.1', resolve);
   });
   console.log(`MCP 服务已启动 http://127.0.0.1:${config.port}/mcp`);
-  console.log(`可访问 ${config.roots.length} 个目录，认证已启用。按 Ctrl+C 停止。`);
+  console.log(config.accessMode === 'all'
+    ? '全电脑访问已开启，使用当前操作系统账户权限。认证已启用。按 Ctrl+C 停止。'
+    : `可访问 ${config.roots.length} 个目录，认证已启用。按 Ctrl+C 停止。`);
   const shutdown = () => {
     http.close();
     const timer = setTimeout(() => http.closeAllConnections(), 5000);

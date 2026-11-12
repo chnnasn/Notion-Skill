@@ -19,7 +19,9 @@ async function verify() {
     local = await connectLocal(config);
     const queue = new NotionQueue(remote, config.notion.deviceId);
     const filename = path.join(runtime, 'verification.json');
+    const scope = JSON.stringify({ accessMode: config.accessMode, roots: config.roots });
     let state = await readJson(filename, {});
+    if (state.verified || state.scope !== scope) state = {};
     if (!state.pageId) {
       await callNotion(remote, 'notion-fetch', { id: 'notion://docs/notion-flavored-markdown-spec' });
       const request = { version: 1, deviceId: config.notion.deviceId, tool: 'list_roots', arguments: {} };
@@ -30,7 +32,7 @@ async function verify() {
       await saveJson(path.join(runtime, 'create-response.json'), created);
       const page = created.pages?.[0];
       if (!page) throw new Error('创建结果缺少 pages。');
-      state = { pageId: pageId(page.id || page.url), url: page.url };
+      state = { pageId: pageId(page.id || page.url), url: page.url, scope };
       await saveJson(filename, state);
     }
     console.log(`验证任务 ${state.url || state.pageId}`);
@@ -49,7 +51,11 @@ async function verify() {
     assert.equal(finished.status, 'succeeded');
     const result = finished.text.match(/NLCRESULTBEGIN\s+```json\s*([\s\S]*?)```\s+NLCRESULTEND/);
     assert.ok(result, '结果块未保存到 Notion');
-    assert.deepEqual(JSON.parse(result[1]).result.roots, config.roots);
+    const expected = await local.client.callTool({ name: 'list_roots', arguments: {} });
+    assert.ok(!expected.isError);
+    const received = JSON.parse(result[1]).result;
+    assert.equal(received.access_mode, config.accessMode);
+    assert.deepEqual(received.roots, expected.structuredContent.roots);
     state.verified = new Date().toISOString();
     await saveJson(filename, state);
     console.log('验证成功，Notion 任务发现、本机 MCP 执行和结果回传均通过。');
