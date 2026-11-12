@@ -1,6 +1,6 @@
 ---
 name: notion-local-files
-description: 浏览和读取本机文件与目录，执行 PowerShell、CMD、Git、Python、npm 等命令，打开文件和程序，在 Notion 中控制本机 MCP。用户提出电脑文件、命令行、项目构建、应用任务或 MCP 开关请求时使用。
+description: 操作用户的 Windows 电脑。用户要求 push、pull、commit、git status、推送仓库、运行 Python/npm/测试、读取本机路径或打开程序时使用。通过创建 Notion 任务页，让已配对的本机接收器执行命令和文件操作，再读取结果回报。
 ---
 
 # Notion-skill
@@ -8,9 +8,15 @@ description: 浏览和读取本机文件与目录，执行 PowerShell、CMD、Gi
 设备标识为 `{{DEVICE_ID}}`，任务标题前缀为 `{{DEVICE_TAG}}`。
 接收器通过已登录的 Notion 账户领取任务，默认在本机任务到达后启动 MCP，处理完当前批次后关闭。用户可以在 Notion 中手动开启、关闭 MCP 或恢复按需模式。结果写入同一任务页。执行依赖电脑开机且后台接收器在线，首次安装完成时接收器会在当前 Windows 会话中运行。
 
+## 执行入口
+
+本 Skill 的执行入口是 Notion 的页面创建和读取能力。将本机操作写入下面格式的任务页，接收器会调用电脑上的 MCP，再把实际结果写回该页。`run_command`、`read_file` 等名称填写在请求 JSON 的 `tool` 字段中，由本机接收器分发。
+
+收到“push 某个本机仓库”“运行测试”“执行 Python 脚本”等执行请求时，创建 `run_command` 任务，等待任务页结果后回答。工作目录采用用户指定或上下文已确认的本机路径。执行能力和失败原因依据新任务的实际状态、输出和退出码判断。用户明确询问操作方法时，可以提供命令说明。
+
 ## 创建并等待任务
 
-1. 根据用户目标选择下表中的工具及参数。已知完整路径时直接读取或列出该路径。需要查询访问模式、磁盘或系统位置时创建新的 `list_roots` 任务，使用最新结果。用户提到桌面、下载、文档或用户目录时，用返回的 `locations.desktop`、`locations.downloads`、`locations.documents` 或 `locations.home` 定位。用户仅要求开启、关闭或查询 MCP 时，创建 `mcp_control` 任务。
+1. 根据用户目标选择下表中的工具及参数。Git、脚本、测试和构建请求使用 `run_command`。读取或浏览请求使用对应的文件工具。需要查询访问模式、磁盘或系统位置时创建新的 `list_roots` 任务，使用最新结果。用户提到桌面、下载、文档或用户目录时，用返回的 `locations.desktop`、`locations.downloads`、`locations.documents` 或 `locations.home` 定位。用户仅要求开启、关闭或查询 MCP 时，创建 `mcp_control` 任务。
 2. 从当前聊天上下文或用户指定的 Notion 页面获取目标页面 URL，必要时搜索并读取确认。在该页面下创建独立的任务子页面。上下文缺少目标页面时，创建私有任务页。页面 URL 由 Notion 创建工具返回。
 3. 标题使用 `{{DEVICE_TAG}} pending 简短任务名称`，保留前缀、状态和空格。页面正文按下面的完整格式填写，每个页面包含一个请求。
 4. 保存创建结果返回的页面 URL，约每 10 秒重新读取该任务页。依次出现 `pending`、`running`、`succeeded`、`failed` 或 `review`。成功时读取 `NLCRESULTBEGIN` 与 `NLCRESULTEND` 之间的 JSON，按 `result` 回答或继续下一步。依赖前一步返回的路径或程序名称时，先取得结果再创建下一任务。
@@ -67,6 +73,12 @@ NLCREQUESTEND
 ## 执行命令行
 
 用户要求运行命令、执行脚本、查询 Git 状态、运行测试或构建项目时，使用 `run_command`。默认通过 Windows PowerShell 执行，`shell="cmd"` 使用 CMD。按用户任务选择命令，工作目录使用目标项目的实际绝对路径。命令使用当前 Windows 账户权限，可以修改文件和访问网络。文件工具的 `roots` 范围用于文件访问与命令工作目录校验，命令本身的权限由操作系统决定。
+
+### Git 请求
+
+用户提出 `push` 并给出本机仓库路径时，根据当前分支、已有上游以及用户指定的目标，创建 `run_command` 任务执行 `git push`，`cwd` 使用该仓库路径，`timeout_ms` 可设为 `120000`。需要检查仓库状态时，先通过任务执行 `git status --short --branch`，再继续用户请求的操作。缺少上游、认证失败或远程拒绝推送时，读取命令返回的具体错误，按实际原因处理。
+
+`pull`、`commit` 和其他 Git 请求按同一任务协议执行对应操作。操作范围以用户当前请求为准，结果回报包含实际退出码和输出。
 
 例如在项目中查询 Git 状态，创建 `tool="run_command"` 任务，参数如下。
 

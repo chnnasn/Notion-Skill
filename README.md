@@ -92,6 +92,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Start
 
 可以直接提出“在 `E:\Github\Notion-Skill` 运行 `git status --short`”“执行 Python 脚本并告诉我结果”或“运行项目测试，超时设为 5 分钟”。Skill 会创建 `run_command` 任务，接收器按当前 MCP 模式执行，并将输出和退出码写回任务页。
 
+也支持“push E:\Github\Notion-Skill”“pull 当前项目”等 Git 请求。Skill 将命令放入 Notion 任务页的 `tool="run_command"` 请求中，由接收器执行。任务页中的输出和退出码用于确认操作结果。
+
+如果聊天直接回复“无法在电脑执行 Git”且没有创建任务页，在输入框键入 `/`，选择 `Notion-skill`，再发送原请求，让当前对话加载 Skill 的执行流程。自动调用由 Notion 根据 Skill 描述选择，手动选择可以明确指定此次使用的 Skill。[Notion Skills 使用方式](https://www.notion.com/help/create-and-manage-skills)
+
 | 参数 | 默认值与用途 |
 | --- | --- |
 | `command` | 要执行的命令，最长 8000 字符，PowerShell 支持多行脚本 |
