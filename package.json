@@ -1,0 +1,27 @@
+{
+  "name": "notion-local-files-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Notion Skill with an OAuth-connected Windows client for local files and desktop applications.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.16"
+  },
+  "scripts": {
+    "setup": "node src/setup.js",
+    "start": "node src/server.js",
+    "login": "node src/login.js",
+    "client": "node src/worker.js",
+    "open-notion": "node src/launcher.js",
+    "client:stop": "node src/launcher.js stop",
+    "client:status": "node src/launcher.js status",
+    "verify": "node src/verify.js",
+    "install-skill": "node src/install.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.1.0"
+  },
+  "license": "MIT"
+}

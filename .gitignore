@@ -1,0 +1,7 @@
+node_modules/
+.notion-local-mcp.json
+.env
+*.log
+coverage/
+.runtime/
+dist/
