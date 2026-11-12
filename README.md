@@ -112,6 +112,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Start
 
 更新已有安装时，使用上文的停止接收器、运行 `src/install.js`、启动接收器步骤，同步更新 Notion Skill，再新建聊天加载命令工具说明。
 
+### Git 操作示例
+
+在 Notion 聊天中选择此电脑的 `Notion-skill`，并提供仓库的完整路径，例如：
+
+- `查看 E:\Github\Notion-Skill 的 git status`
+- `commit E:\Github\Notion-Skill，提交信息为 docs: update README`
+- `push E:\Github\Notion-Skill`
+- `pull E:\Github\Notion-Skill`
+
+提交会创建本地 commit，不会自动推送；push 只推送已有提交，不会自动提交尚未提交的更改。远程操作需要仓库的上游配置和认证可用。以任务返回的输出和退出码确认结果。
+
 ## 在新电脑上使用
 
 每台电脑分别解压程序包，并执行上面的一键安装命令。配置、Windows 用户凭据和设备标识都会在该电脑上创建。安装完成后会输出新设备的 Skill 链接。
