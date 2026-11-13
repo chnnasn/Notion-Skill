@@ -37,7 +37,7 @@ test('desktop tools preserve path boundaries, expose actions, and coalesce concu
     },
     async open(target, reveal) { opened.push({ target, reveal }); },
   };
-  const desktop = new DesktopControl(loaded, new LocalFiles(loaded.roots, [configFile]), driver);
+  const desktop = new DesktopControl(loaded, new LocalFiles(loaded.roots, [configFile]), driver, async () => true);
   const http = createHttpServer(loaded, desktop);
   http.listen(0, '127.0.0.1');
   await once(http, 'listening');

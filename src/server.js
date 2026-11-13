@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { createMcpServer } from './mcp.js';
 import { LocalFiles } from './filesystem.js';
 import { DesktopControl } from './desktop.js';
+import { confirmLocally } from './approval.js';
 
 function digest(value) {
   return createHash('sha256').update(value).digest();
@@ -17,9 +18,10 @@ function json(response, status, value, headers = {}) {
   response.end(JSON.stringify(value));
 }
 
-export function createHttpServer(config, desktop = new DesktopControl(config, new LocalFiles(
-  config.roots, [config.configFile, path.join(path.dirname(config.configFile), '.runtime')], config.accessMode,
-))) {
+export function createHttpServer(config, desktop, confirm = confirmLocally) {
+  desktop ||= new DesktopControl(config, new LocalFiles(
+    config.roots, [config.configFile, path.join(path.dirname(config.configFile), '.runtime')], config.accessMode,
+  ), undefined, confirm);
   const expectedToken = digest(`Bearer ${config.token}`);
   const publicHost = config.publicUrl ? new URL(config.publicUrl).host : null;
   const origins = new Set([
@@ -61,7 +63,7 @@ export function createHttpServer(config, desktop = new DesktopControl(config, ne
       return;
     }
 
-    const server = createMcpServer(config, desktop);
+    const server = createMcpServer(config, desktop, confirm);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     response.setHeader('Cache-Control', 'no-store');
     response.once('close', () => { void server.close().catch(() => {}); });

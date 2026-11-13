@@ -17,7 +17,7 @@ before(async () => {
 
 after(() => rm(directory, { recursive: true, force: true }));
 
-const run = (args, signal) => runCommand(commandSchema.parse({ cwd, ...args }), files, signal);
+const run = (args, signal) => runCommand(commandSchema.parse({ cwd, ...args }), files, signal, async () => true);
 const windowsOnly = { skip: process.platform !== 'win32' };
 
 test('PowerShell captures Unicode output, stderr and the requested working directory', windowsOnly, async () => {

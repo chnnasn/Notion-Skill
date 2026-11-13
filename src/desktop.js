@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { promisify } from 'node:util';
 import { FileAccessError } from './filesystem.js';
+import { authorizeAction, confirmLocally } from './approval.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -109,11 +110,12 @@ export const windowsDesktop = {
 };
 
 export class DesktopControl {
-  constructor(config, files, driver = windowsDesktop) {
+  constructor(config, files, driver = windowsDesktop, confirm = confirmLocally) {
     this.settings = config.desktop || { enabled: false, apps: {}, openExtensions: [] };
     this.files = files;
     this.driver = driver;
     this.pendingApps = new Map();
+    this.confirm = confirm;
   }
 
   assertEnabled() {
@@ -138,11 +140,15 @@ export class DesktopControl {
     };
   }
 
-  async ensureApp(name) {
+  async ensureApp(name, risk, signal) {
     this.assertEnabled();
     if (!Object.hasOwn(this.settings.apps, name)) throw new FileAccessError('UNKNOWN_APP', '请从 list_apps 返回的程序中选择。');
-    if (this.pendingApps.has(name)) return this.pendingApps.get(name);
-    const pending = this.startIfNeeded(name);
+    if (this.pendingApps.has(name)) {
+      const result = await this.pendingApps.get(name);
+      signal?.throwIfAborted();
+      return result;
+    }
+    const pending = this.startIfNeeded(name, risk, signal);
     this.pendingApps.set(name, pending);
     try {
       return await pending;
@@ -151,28 +157,45 @@ export class DesktopControl {
     }
   }
 
-  async startIfNeeded(name) {
+  async startIfNeeded(name, risk, signal) {
     const { apps } = await this.listApps();
     const app = apps.find((item) => item.name === name);
     if (app.running_pids.length) return { name, status: 'already_running', pids: app.running_pids };
+    const safety = await authorizeAction({ tool: 'ensure_app', name, executable: app.executable, risk },
+      this.isSystemViewer(app.executable), signal, this.confirm);
     const pid = await this.driver.launch(app.executable, []);
-    return { name, status: 'launch_requested', pid };
+    return { name, status: 'launch_requested', pid, safety };
   }
 
-  async openPath(input, mode, appName) {
+  isSystemViewer(executable, filename = false) {
+    const system = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+    const names = filename ? ['notepad.exe'] : ['notepad.exe', 'calc.exe', 'mspaint.exe'];
+    return names.some((name) => path.relative(path.join(system, name), executable) === '');
+  }
+
+  async openPath(input, mode, appName, risk, signal) {
     this.assertEnabled();
     const info = await this.files.pathInfo(input);
     if (!['file', 'directory'].includes(info.type)) throw new FileAccessError('UNSUPPORTED_TYPE', '只能打开普通文件或目录。');
     if (appName) {
       if (mode === 'reveal') throw new FileAccessError('INVALID_MODE', '指定 app 时使用 open 模式。');
       if (!Object.hasOwn(this.settings.apps, appName)) throw new FileAccessError('UNKNOWN_APP', '请从 list_apps 返回的程序中选择。');
-      const pid = await this.driver.launch(this.settings.apps[appName].executable, [info.path]);
-      return { path: info.path, app: appName, status: 'open_requested', pid };
+      const executable = this.settings.apps[appName].executable;
+      const safety = await authorizeAction({ tool: 'open_path', path: info.path, mode, app: appName, executable, risk },
+        info.type === 'file' && this.isSystemViewer(executable, true), signal, this.confirm);
+      if (await this.files.resolve(info.path) !== info.path) throw new FileAccessError('PATH_CHANGED', '确认期间目标路径已改变，请重新检查任务。');
+      signal?.throwIfAborted();
+      const pid = await this.driver.launch(executable, [info.path]);
+      return { path: info.path, app: appName, status: 'open_requested', pid, safety };
     }
     if (mode === 'open' && info.type === 'file' && !this.settings.openExtensions.includes(path.extname(info.path).toLowerCase())) {
       throw new FileAccessError('APP_REQUIRED', '请指定 list_apps 中的程序打开此文件，或使用 reveal 在资源管理器中定位。可在本机配置 openExtensions 调整默认应用打开的文件类型。');
     }
+    const safety = await authorizeAction({ tool: 'open_path', path: info.path, mode, risk },
+      mode === 'reveal' || info.type === 'directory', signal, this.confirm);
+    if (await this.files.resolve(info.path) !== info.path) throw new FileAccessError('PATH_CHANGED', '确认期间目标路径已改变，请重新检查任务。');
+    signal?.throwIfAborted();
     await this.driver.open(info.path, mode === 'reveal' && info.type === 'file');
-    return { path: info.path, status: 'open_requested', mode };
+    return { path: info.path, status: 'open_requested', mode, safety };
   }
 }

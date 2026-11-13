@@ -86,13 +86,13 @@ test('queued full-computer reads start stdio MCP with all access and no director
   await assert.rejects(readFile(path.join(path.dirname(filename), '.runtime', 'access.json')), { code: 'ENOENT' });
 });
 
-test('queued commands execute through stdio and respect manual off mode', { skip: process.platform !== 'win32' }, async (t) => {
+test('queued low-risk commands execute automatically through stdio and respect manual off mode', { skip: process.platform !== 'win32' }, async (t) => {
   const controls = await queuedControls(t);
-  const args = { command: 'Set-Content -LiteralPath result.txt -Value "命令已执行" -Encoding UTF8\nWrite-Output "完成"', cwd: controls.config.roots[0] };
+  const args = { command: 'node --version', cwd: controls.config.roots[0], risk: { level: 'low', reason: '查询运行时版本' } };
   const job = await controls.run(controls.create('run_command', args));
   assert.equal(job.status, 'succeeded');
-  assert.equal(job.result.stdout.trim(), '完成');
-  assert.ok((await readFile(path.join(args.cwd, 'result.txt'), 'utf8')).includes('命令已执行'));
+  assert.equal(job.result.stdout.trim(), process.version);
+  assert.equal(job.result.safety.decision, 'automatic');
   assert.equal(controls.state.mcpPid, null);
   await controls.run(controls.create('mcp_control', { action: 'stop' }));
   const blocked = await controls.run(controls.create('run_command', args));
@@ -111,7 +111,7 @@ test('command MCP transport timeout includes the requested runtime and cleanup t
   }));
   const job = await controls.run(controls.create('run_command', { command: 'Write-Output done', timeout_ms: 120_000 }));
   assert.equal(job.status, 'succeeded');
-  assert.equal(options.timeout, 135_000);
+  assert.equal(options.timeout, 270_000);
 });
 
 test('desktop launcher reuses the receiver and can stop it without starting MCP', { skip: process.platform !== 'win32' }, async (t) => {

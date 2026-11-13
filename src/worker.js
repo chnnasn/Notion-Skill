@@ -9,6 +9,7 @@ import { NotionQueue } from './notion-queue.js';
 import { JobRunner } from './jobs.js';
 import { acquireLock } from './storage.js';
 import { commandSchema } from './commands.js';
+import { APPROVAL_TIMEOUT_MS } from './approval.js';
 
 export async function connectLocal(config) {
   const client = new Client({ name: 'notion-local-worker', version: '0.2.0' });
@@ -117,7 +118,10 @@ export class McpController {
     await this.start();
     if (request.name === 'run_command') {
       const args = commandSchema.parse(request.arguments);
-      return this.local.client.callTool({ ...request, arguments: args }, undefined, { timeout: args.timeout_ms + 15_000 });
+      return this.local.client.callTool({ ...request, arguments: args }, undefined, { timeout: args.timeout_ms + APPROVAL_TIMEOUT_MS + 30_000 });
+    }
+    if (['ensure_app', 'open_path'].includes(request.name)) {
+      return this.local.client.callTool(request, undefined, { timeout: APPROVAL_TIMEOUT_MS + 60_000 });
     }
     return this.local.client.callTool(request);
   }

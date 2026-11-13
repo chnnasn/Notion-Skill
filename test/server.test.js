@@ -67,7 +67,7 @@ before(async () => {
   await symlink(outside, path.join(root, 'outside-link'), process.platform === 'win32' ? 'junction' : 'dir');
   await symlink(path.join(root, '子目录'), path.join(root, 'inside-link'), process.platform === 'win32' ? 'junction' : 'dir');
   config = await loadConfig({ NOTION_MCP_CONFIG: configFile });
-  http = createHttpServer(config);
+  http = createHttpServer(config, undefined, async (action) => action.risk?.level !== 'low');
   http.listen(0, '127.0.0.1');
   await once(http, 'listening');
   url = new URL(`http://127.0.0.1:${http.address().port}/mcp`);
@@ -109,6 +109,13 @@ test('HTTP command execution returns failure details and validates arguments', {
   assert.equal(failure.value.stderr.trim(), '失败详情');
   const invalid = await client.callTool({ name: 'run_command', arguments: { command: 'Write-Output never', timeout_ms: -1 } });
   assert.equal(invalid.isError, true);
+  const denied = await call('run_command', {
+    command: 'Set-Content -LiteralPath denied.txt -Value unsafe', cwd: root,
+    risk: { level: 'low', reason: 'AI claims this is safe' },
+  });
+  assert.equal(denied.response.isError, true);
+  assert.equal(denied.value.code, 'USER_DECLINED');
+  await assert.rejects(readFile(path.join(root, 'denied.txt')), { code: 'ENOENT' });
 });
 
 test('directory pagination, Chinese paths, path metadata, and search work over HTTP', async () => {

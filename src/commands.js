@@ -6,6 +6,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { FileAccessError } from './filesystem.js';
+import { authorizeAction, confirmLocally, riskSchema } from './approval.js';
+import { automaticCommand } from './command-policy.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,18 +17,26 @@ export const commandSchema = z.object({
   cwd: z.string().min(1).max(4096).default('.'),
   timeout_ms: z.number().int().min(1000).max(600_000).default(60_000),
   max_output_bytes: z.number().int().min(256).max(8192).default(8192),
+  risk: riskSchema,
 }).strict();
 
-export async function runCommand(args, files, signal) {
+export async function runCommand(args, files, signal, confirm = confirmLocally) {
+  args = commandSchema.parse(args);
   if (process.platform !== 'win32') throw new FileAccessError('UNSUPPORTED_PLATFORM', '命令行工具当前支持 Windows。');
   const cwd = await files.resolve(args.cwd);
   if (!(await stat(cwd)).isDirectory()) throw new FileAccessError('NOT_DIRECTORY', '命令工作目录必须是目录。');
   signal?.throwIfAborted();
+  const automatic = await automaticCommand(args.command, cwd, signal);
+  const safety = await authorizeAction({ tool: 'run_command', ...args, cwd }, Boolean(automatic), signal, confirm);
+  if (await files.resolve(cwd) !== cwd) throw new FileAccessError('PATH_CHANGED', '确认期间工作目录已改变，请重新检查任务。');
   const systemDirectory = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
   let executable;
   let commandArgs;
   let scriptFile;
-  if (args.shell === 'cmd') {
+  if (automatic) {
+    executable = automatic.executable;
+    commandArgs = automatic.args;
+  } else if (args.shell === 'cmd') {
     executable = path.join(systemDirectory, 'cmd.exe');
     scriptFile = path.join(os.tmpdir(), `notion-command-${randomUUID()}.cmd`);
     // CMD must change code page on a preceding line before decoding the user's script.
@@ -56,12 +66,13 @@ ${args.command}
       '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
   }
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
-  const env = { ...process.env, [pathKey]: [path.dirname(process.execPath), process.env[pathKey]].filter(Boolean).join(path.delimiter) };
+  const env = automatic?.env || { ...process.env, [pathKey]: [path.dirname(process.execPath), process.env[pathKey]].filter(Boolean).join(path.delimiter) };
   const started = Date.now();
   try {
+    signal?.throwIfAborted();
     return await new Promise((resolve, reject) => {
       const child = spawn(executable, commandArgs, {
-        cwd, env, windowsHide: true, windowsVerbatimArguments: args.shell === 'cmd',
+        cwd, env, windowsHide: true, windowsVerbatimArguments: !automatic && args.shell === 'cmd',
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       const output = { stdout: [], stderr: [] };
@@ -96,6 +107,7 @@ ${args.command}
           shell: args.shell, cwd, exit_code: code, signal: exitSignal,
           stdout: decode(output.stdout), stderr: decode(output.stderr),
           timed_out: stopReason === 'timed_out', truncated, duration_ms: Date.now() - started,
+          safety,
           ...(terminationError ? { termination_error: terminationError } : {}),
         });
       }

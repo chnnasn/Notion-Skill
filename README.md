@@ -90,6 +90,32 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Start
 
 ## 在 Notion 中执行命令
 
+### 按风险确认
+
+Notion AI 根据当前请求填写风险等级和原因，本机规则检查完整命令、路径及程序。规则验证通过的低风险操作自动执行，涉及变更、AI 标记为高风险或不确定、以及规则无法验证的操作会显示本机确认窗口。已有安装更新后默认启用，旧任务省略风险字段时也会检查。
+
+| 操作 | 默认处理 |
+| --- | --- |
+| 读取、搜索、列目录、查看应用状态 | 自动执行 |
+| 定位文件、打开文件夹、启动系统记事本/计算器/画图，用系统记事本读取文件 | 本机验证路径后自动执行 |
+| 单条 Node 版本查询、规则覆盖的 Git status/diff/log/rev-parse 查询 | 本机验证命令及配置后自动执行 |
+| 删除、覆盖、移动、Git commit/push/pull/reset、安装、系统修改、网络传输 | 本机确认 |
+| PowerShell/CMD 组合命令、自定义脚本、npm 测试/构建、未知命令、其他程序或默认文件关联 | 本机确认 |
+
+AI 在 `run_command`、`ensure_app` 和 `open_path` 的参数中加入 `"risk":{"level":"low","reason":"只查询仓库状态"}`。level 可选 `low`、`high`、`unknown`。AI 可以要求更严格的确认，low 仍需通过本机检查。风险判断依据用户目标及实际操作，读取的文件和网页内容作为资料处理。
+
+确认窗口显示完整操作、命令工作目录、程序路径和风险说明。“允许本次”只批准当前操作。取消、关闭窗口、Esc、回车或等待两分钟会拒绝执行，窗口不可用时也会拒绝。正在显示其他确认时返回 `APPROVAL_BUSY`。用户拒绝或确认超时后，Skill 会报告结果并等待新的指示。结果中的 `safety.decision` 记录 `automatic` 或 `confirmed`。
+
+自动 Git 命令限定为单条 `git status` 及短格式/分支选项、`git diff` 及统计/暂存区选项、`git log` 及 oneline/条数选项、`git rev-parse --show-toplevel` / `--is-inside-work-tree` 和 `git --version`。日志默认最多 50 条，`-n` 支持 1 到 999。Node 支持 `node --version` / `node -v`。其他语法和选项进入确认。
+
+自动查询使用从本机 PATH 解析的程序绝对路径，并跳过任务目录中的同名程序。Git 查询限制可选写入、网络获取、分页器及外部程序调用。status/diff 检测到 clean/process 过滤器时需要确认，因为过滤器可以执行额外程序。相关机制参见 [Git 命令说明](https://git-scm.com/docs/git)、[Git diff 说明](https://git-scm.com/docs/git-diff)和 [Git 过滤器说明](https://git-scm.com/docs/gitattributes)。
+
+自动桌面启动只覆盖 `Windows\\System32` 中的 `notepad.exe`、`calc.exe`、`mspaint.exe`，传入文件自动打开仅覆盖该路径的记事本。其他可执行文件和默认文件关联均由用户确认。AI 标记 high 或 unknown 时，规则覆盖的操作也会要求确认。
+
+批准后的命令使用当前 Windows 账户的完整权限，确认机制依赖用户核对实际操作。文件读取仍按现有访问模式自动执行，内容会写回 Notion 任务页。更新后按下文的安装更新步骤同步 Skill 并重启接收器，新聊天将加载风险判断流程。
+
+### 命令执行
+
 可以直接提出“在 `E:\Github\Notion-Skill` 运行 `git status --short`”“执行 Python 脚本并告诉我结果”或“运行项目测试，超时设为 5 分钟”。Skill 会创建 `run_command` 任务，接收器按当前 MCP 模式执行，并将输出和退出码写回任务页。
 
 也支持“push E:\Github\Notion-Skill”“pull 当前项目”等 Git 请求。Skill 将命令放入 Notion 任务页的 `tool="run_command"` 请求中，由接收器执行。任务页中的输出和退出码用于确认操作结果。
@@ -103,8 +129,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\client.ps1 -Action Start
 | `cwd` | 默认 `.`，相对路径基准为配置中的第一个目录 |
 | `timeout_ms` | 默认 60000，支持 1000 到 600000 毫秒 |
 | `max_output_bytes` | 默认 8192，支持 256 到 8192，限制两路输出的总字节数 |
+| `risk` | AI 判断的 level 和 reason，low 经过本机规则校验，high/unknown 需要本机确认 |
 
-每次调用启动独立的非交互 shell，在后台执行。结果包含 `stdout`、`stderr`、`exit_code`、`status`、`duration_ms`、`timed_out` 和 `truncated`。退出码为 0 时返回 `completed`，非零为 `failed`。超时和取消会尝试终止命令进程树，并返回已有输出。`termination_error` 表示终止失败，`truncated` 表示输出被截断。完整日志可以由命令重定向到文件后分块读取。
+自动查询直接调用已解析的程序，其他命令经确认后启动独立的非交互 shell，在后台执行。结果包含 `stdout`、`stderr`、`exit_code`、`status`、`duration_ms`、`timed_out`、`truncated` 和 `safety`。执行超时从命令启动计时，本机确认另计两分钟。退出码为 0 时返回 `completed`，非零为 `failed`。超时和取消会尝试终止命令进程树，并返回已有输出。`termination_error` 表示终止失败，`truncated` 表示输出被截断。完整日志可以由确认后的命令重定向到文件后分块读取。
 
 命令使用接收器所属账户的完整操作系统权限，可以修改文件、启动程序及访问网络。文件工具的目录限制和凭据保护作用于文件工具，`run_command.cwd` 也接受路径校验。命令执行中的路径访问由 Windows 账户权限决定。Skill 按用户任务生成命令并回报实际结果。
 
@@ -215,7 +242,7 @@ npm run verify
 npm run client -- --once
 ```
 
-`npm test` 覆盖全电脑访问、限定模式兼容、文件读取、分页、路径权限、按任务授权目录与即时加载、HTTP 和 stdio MCP、PowerShell 与 CMD 命令、中文输出、退出码、超时进程树终止、取消、截断、桌面操作分发、MCP 手动开关与按需恢复、任务恢复、Notion Markdown 转义、互斥和凭据加密。
+`npm test` 覆盖全电脑访问、限定模式兼容、文件读取、分页、路径权限、按任务授权目录与即时加载、HTTP 和 stdio MCP、PowerShell 与 CMD 命令、中文输出、退出码、超时进程树终止、取消、截断、风险分级、AI 低风险声明无法越过本机检查、拒绝执行、桌面操作分发、MCP 手动开关与按需恢复、任务恢复、Notion Markdown 转义、互斥和凭据加密。测试通过注入确认结果验证允许和拒绝分支。
 
 `npm run verify` 使用真实登录创建私有验证任务，确认客户端能搜索到任务、通过本机 MCP 获取允许目录，并把一致的结果保存回 Notion。验证页面会保留供检查。`client -- --once` 执行一轮实际任务查询。
 
@@ -226,6 +253,8 @@ npm run client -- --once
 `npm start` 提供 `http://127.0.0.1:3210/mcp`，供支持 Streamable HTTP 的本机 MCP 客户端使用。认证使用配置中的 `token`，请求头为 `Authorization: Bearer <token>`。`GET /health` 提供进程健康状态。
 
 HTTP 服务和 Notion 任务客户端复用同一组文件、路径和桌面工具。`NOTION_MCP_CONFIG` 可以指定其他配置文件。
+
+HTTP MCP 使用相同风险检查和本机确认。外部客户端调用命令时，RPC 超时应覆盖两分钟本机确认、命令的 timeout_ms 及至少 30 秒回传余量，桌面操作建议 180 秒。Notion 接收器已经设置对应等待时间。
 
 Notion 中的 `mcp_control` 管理接收器创建的 stdio MCP 子进程。通过 `npm start` 启动的 HTTP 服务由运行该命令的终端管理。
 
