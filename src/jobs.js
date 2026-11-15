@@ -11,7 +11,7 @@ const requestBase = z.object({
 
 export const requestSchema = z.discriminatedUnion('tool', [
   requestBase.extend({
-    tool: z.enum(['list_roots', 'list_directory', 'get_path_info', 'read_file', 'search_files', 'list_apps', 'ensure_app', 'open_path']),
+    tool: z.enum(['list_roots', 'list_directory', 'get_path_info', 'read_file', 'search_files', 'list_apps', 'ensure_app', 'open_path', 'write_file', 'create_directory', 'copy_file']),
     arguments: z.record(z.string(), z.unknown()).default({}),
   }).strict(),
   requestBase.extend({
@@ -28,7 +28,7 @@ export const requestSchema = z.discriminatedUnion('tool', [
   }).strict(),
 ]);
 
-const actionTools = new Set(['ensure_app', 'open_path', 'allow_path', 'run_command']);
+const actionTools = new Set(['ensure_app', 'open_path', 'allow_path', 'run_command', 'write_file', 'create_directory', 'copy_file']);
 
 export class JobRunner {
   constructor({ queue, client, deviceId, journalDirectory }) {

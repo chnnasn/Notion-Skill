@@ -12,6 +12,7 @@ const configSchema = z.object({
   token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/),
   port: z.number().int().min(1).max(65535).default(3210),
   publicUrl: z.string().url().optional(),
+  approvalMode: z.enum(['local', 'host']).default('local'),
   notion: z.object({
     deviceId: z.string().uuid(),
     oauthPort: z.number().int().min(1).max(65535).default(3211),

@@ -6,6 +6,7 @@ import { FileAccessError } from './filesystem.js';
 
 const execFileAsync = promisify(execFile);
 export const APPROVAL_TIMEOUT_MS = 120_000;
+export const hostApproval = async () => true;
 export const riskSchema = z.object({
   level: z.enum(['low', 'high', 'unknown']),
   reason: z.string().min(1).max(1000),
@@ -92,6 +93,7 @@ export async function confirmLocally(action, signal) {
 export async function authorizeAction(action, automatic, signal, confirm = confirmLocally) {
   signal?.throwIfAborted();
   const risk = riskSchema.parse(action.risk);
+  if (confirm === hostApproval) return { decision: 'host_managed', reason: '由已认证 MCP 客户端管理审批', ...(risk ? { ai: risk } : {}) };
   if (automatic && (!risk || risk.level === 'low')) {
     return { decision: 'automatic', reason: '本机规则验证为低风险操作', ...(risk ? { ai: risk } : {}) };
   }

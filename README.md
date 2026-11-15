@@ -1,5 +1,70 @@
 # Notion Local Computer
 
+通过 Notion 操作 Windows 电脑，支持读取、写入、新建目录、复制文件、打开程序及执行命令。当前提供原生 HTTPS MCP 和任务页接收器两种接入方式。
+
+| 项目 | 原生 HTTPS MCP | 任务页接收器 |
+| --- | --- | --- |
+| 调用流程 | Notion 直接调用本机公开的 MCP 工具 | Skill 创建任务页，本机轮询领取并回传 |
+| 审批位置 | Notion 的“为我审核 / Review for me” | 本机规则判断，必要时显示确认窗口 |
+| 长命令 | start_command 返回编号，继续查询状态 | run_command 等待完成后写回任务页 |
+| 连接条件 | 本机 MCP 与 HTTPS 隧道运行 | 本机接收器在线并登录 Notion |
+| 临时地址 | 隧道重启后需更新 Notion 连接 | 使用任务页与设备标识关联 |
+
+## 原生 MCP 连接与 Notion 审批
+
+原生模式通过 HTTPS 直接提供工具，审批由 Notion 聊天的 **Review for me** 管理。Notion 会审查工具调用并在判断可能不安全时询问用户。可在聊天顶部切换审批模式。自定义 MCP 支持认证请求头，使用下面生成的 Bearer token。[Notion 审批设置](https://www.notion.com/help/choose-how-notion-agent-asks-for-your-approval)、[自定义 MCP 认证](https://www.notion.com/help/mcp-connections-for-custom-agents)
+
+1. 首次安装仍按下文完成运行时配置。下载官方 [cloudflared Windows amd64](https://github.com/cloudflare/cloudflared/releases/latest)，将程序保存为 `.runtime/cloudflared.exe`。核对发布页资产的 SHA256。
+2. 在 `.notion-local-mcp.json` 设置 `"approvalMode":"host"`。旧配置默认 `local`，HTTP 模式为 host 时使用客户端审批。stdio 任务页执行仍使用本机确认。
+3. 在项目目录执行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\native.ps1`。脚本会停止旧任务页接收器，在本次会话建立隧道并提供原生工具。关闭脚本会结束连接。
+4. 在 Notion 的设置 → 连接 → 浏览连接 → 添加连接 → 自定义 MCP 连接，填写 `.runtime/native-connection.json` 中的 `url`，名称填写 `Notion-skill`。验证方式选 Bearer token，前缀选 Bearer，Token 字段填 `headers.Authorization` 中去掉开头 `Bearer ` 后的部分。支持自定义请求头的表单也可直接填写完整 Authorization 值。工作区需允许添加自定义 MCP。
+5. 点击连接后，在管理 → Notion 代理中确认连接有效。读取工具设为“自动运行”，写入工具设为“为我审核”。当前有 7 个读取工具和 8 个写入工具。
+6. 在项目目录执行下面的命令，按本机配置更新对应 Skill。随后在 Notion 新建聊天并选择 Notion-skill，确认聊天的审批模式为“为我审核 / Review for me”。原生 Skill 直接调用工具，并查询长任务结果。
+
+```powershell
+$notionNode = (Get-Content -Raw .\.runtime\launcher.json | ConvertFrom-Json).nodeExecutable
+& $notionNode .\src\install.js
+```
+
+日常使用时保持 `native.ps1` 运行，可直接说“读取桌面的报告”“新建一个文本文件并写入内容”“复制这个文件到指定目录”或“clone 仓库到 E:\\Projects”。路径不明确时，Skill 会先查询实际位置。执行完成以工具返回结果为准。
+
+`native-connection.json` 含访问凭据，保存在受文件工具保护且 Git 忽略的 `.runtime` 中。任何持有该凭据的客户端均可按当前 Windows 账户权限调用工具。host 模式将审批交由已认证客户端，服务端无法验证某次调用是否经过人工点击批准。应在 Notion 中设置期望的审批方式。
+
+临时隧道每次启动生成新地址，需在 Notion 中更新连接。隧道无持续在线保证，重新连接后可查询仍在运行的命令。长期使用可以配置固定 HTTPS 隧道，再用 `npm start` 提供服务。Quick Tunnel 的功能和限制见 [Cloudflare 文档](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)。
+
+固定地址部署时，将 `.notion-local-mcp.json` 的 `publicUrl` 设为对应的 HTTPS 来源，例如 `https://files.example.com`，并将隧道转发到 `http://127.0.0.1:3210`。保留 Bearer 认证，Notion 连接 URL 使用该来源下的 `/mcp`。端口以配置中的 port 为准。
+
+### 文件与长命令工具
+
+| 工具 | 参数与行为 |
+| --- | --- |
+| `read_file` | 分块读取现有文件，沿用编码与分页参数 |
+| `write_file` | `path`、`content`、`encoding`，默认 utf8，父目录须存在。默认拒绝覆盖，`overwrite=true` 替换时返回 `backup_path` |
+| `create_directory` | `path`，在现有父目录下新建一级目录，多级目录逐级创建 |
+| `copy_file` | `source`、`destination`，复制普通文件，拒绝覆盖。目录逐项列出后复制 |
+| `start_command` | 同 run_command 参数，立即返回 `task_id`，用于 clone、脚本、安装或构建 |
+| `get_command_task` | `task_id`，每 3–5 秒查询直到终态，结果含输出、退出码及失败原因 |
+| `cancel_command_task` | `task_id`，请求终止命令进程树，随后继续查询实际状态 |
+
+长命令执行独立于单次 HTTP 请求，断线后继续使用原 task_id 查询。运行超时由 timeout_ms 控制，最长十分钟。任务完成一小时后记录过期，服务重启会清空内存记录，此时先检查文件或仓库状态再决定重试。取消和失败可能留下部分修改。并发命令最多四个，保存记录最多一百条。
+
+文件工具校验目录范围、服务配置保护和链接目标。新建与复制先写临时文件再发布，避免目标文件暴露未完成的内容。覆盖写入保存同目录备份并替换文件。避免在其他程序同时修改目标时覆盖，文件操作受 Windows 账户权限和文件系统支持限制。
+
+### 超时与连接排查
+
+- 连接失败时确认 `native.ps1` 仍运行，使用 `.runtime/native-connection.json` 中最新的 URL 和认证信息。临时隧道退出后旧地址失效。
+- Notion 工具列表中应有“新建或写入文件”“复制文件”“启动长时间命令”和“查询命令任务”。连接后新建聊天，让会话加载最新工具与 Skill。
+- 原生模式的写入工具审批为“为我审核”。需要用户确认时，在 Notion 中检查审批提示。若回答仍要求电脑本机弹窗，检查当前会话是否沿用了旧任务页 Skill，以及 HTTP 配置是否为 `approvalMode=host`。
+- clone、安装、测试及构建使用 start_command。返回 running 时保留 task_id 并持续查询，调用连接暂时失败后使用同一个编号恢复查询。
+- completed 表示命令成功结束。failed、timed_out、cancelled 及 error 字段用于判断命令执行情况。连接超时表示调用链路未及时响应，应继续核查原任务的实际状态。
+- TASK_NOT_FOUND 可能发生在服务重启或记录过期之后。先检查目标文件或仓库状态，再决定是否重新提交。
+
+已验证的链路包括公网 Bearer 认证、后台 git clone，以及 Notion 聊天实际调用新建目录、写入、复制和读取工具。测试命令为 `npm test`，覆盖原生任务跨 HTTP 请求查询、文件覆盖备份、并发新建冲突和受保护路径。
+
+## 任务页接收器
+
+原生 Skill 模板为 `skills/notion-local-files/NATIVE.md`，`approvalMode=host` 时安装器使用该模板。任务页模板为 `skills/notion-local-files/SKILL.md`，以下是该接入方式的安装和使用方法。
+
 在 Notion 聊天中使用 Skill，浏览本机全部磁盘、读取文件、执行 PowerShell 或 CMD 命令，并按需打开文件和已配置的程序。也可以在 Notion 中手动开启、关闭 MCP 或查看状态。本机接收器以 Node.js 脚本运行，通过登录后的 Notion 账户主动领取任务，再将执行结果写回任务页。
 
 ```text
@@ -254,7 +319,7 @@ npm run client -- --once
 
 HTTP 服务和 Notion 任务客户端复用同一组文件、路径和桌面工具。`NOTION_MCP_CONFIG` 可以指定其他配置文件。
 
-HTTP MCP 使用相同风险检查和本机确认。外部客户端调用命令时，RPC 超时应覆盖两分钟本机确认、命令的 timeout_ms 及至少 30 秒回传余量，桌面操作建议 180 秒。Notion 接收器已经设置对应等待时间。
+`approvalMode=local` 时 HTTP MCP 使用本机确认，RPC 超时应覆盖两分钟确认、timeout_ms 及至少 30 秒回传余量。`approvalMode=host` 时审批由客户端管理，长命令优先使用 start_command 和 get_command_task。
 
 Notion 中的 `mcp_control` 管理接收器创建的 stdio MCP 子进程。通过 `npm start` 启动的 HTTP 服务由运行该命令的终端管理。
 

@@ -120,7 +120,7 @@ export class McpController {
       const args = commandSchema.parse(request.arguments);
       return this.local.client.callTool({ ...request, arguments: args }, undefined, { timeout: args.timeout_ms + APPROVAL_TIMEOUT_MS + 30_000 });
     }
-    if (['ensure_app', 'open_path'].includes(request.name)) {
+    if (['ensure_app', 'open_path', 'write_file', 'create_directory', 'copy_file'].includes(request.name)) {
       return this.local.client.callTool(request, undefined, { timeout: APPROVAL_TIMEOUT_MS + 60_000 });
     }
     return this.local.client.callTool(request);

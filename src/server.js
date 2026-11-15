@@ -7,7 +7,8 @@ import { loadConfig } from './config.js';
 import { createMcpServer } from './mcp.js';
 import { LocalFiles } from './filesystem.js';
 import { DesktopControl } from './desktop.js';
-import { confirmLocally } from './approval.js';
+import { confirmLocally, hostApproval } from './approval.js';
+import { CommandTasks } from './command-tasks.js';
 
 function digest(value) {
   return createHash('sha256').update(value).digest();
@@ -18,7 +19,8 @@ function json(response, status, value, headers = {}) {
   response.end(JSON.stringify(value));
 }
 
-export function createHttpServer(config, desktop, confirm = confirmLocally) {
+export function createHttpServer(config, desktop, confirm = config.approvalMode === 'host' ? hostApproval : confirmLocally) {
+  const tasks = new CommandTasks();
   desktop ||= new DesktopControl(config, new LocalFiles(
     config.roots, [config.configFile, path.join(path.dirname(config.configFile), '.runtime')], config.accessMode,
   ), undefined, confirm);
@@ -63,7 +65,7 @@ export function createHttpServer(config, desktop, confirm = confirmLocally) {
       return;
     }
 
-    const server = createMcpServer(config, desktop, confirm);
+    const server = createMcpServer(config, desktop, confirm, config.approvalMode === 'host' ? tasks : undefined);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     response.setHeader('Cache-Control', 'no-store');
     response.once('close', () => { void server.close().catch(() => {}); });
@@ -76,6 +78,7 @@ export function createHttpServer(config, desktop, confirm = confirmLocally) {
       await server.close().catch(() => {});
     }
   });
+  http.closeTasks = () => tasks.close();
   return http;
 }
 
@@ -91,6 +94,7 @@ async function main() {
     ? '全电脑访问已开启，使用当前操作系统账户权限。认证已启用。按 Ctrl+C 停止。'
     : `可访问 ${config.roots.length} 个目录，认证已启用。按 Ctrl+C 停止。`);
   const shutdown = () => {
+    void http.closeTasks();
     http.close();
     const timer = setTimeout(() => http.closeAllConnections(), 5000);
     timer.unref();
