@@ -88,7 +88,7 @@ after(async () => {
 
 test('official MCP client discovers read tools and a command action with accurate annotations', async () => {
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((tool) => tool.name).sort(), ['copy_file', 'create_directory', 'get_path_info', 'list_directory', 'list_roots', 'read_file', 'run_command', 'search_files', 'write_file']);
+  assert.deepEqual(tools.map((tool) => tool.name).sort(), ['copy_directory', 'copy_file', 'create_directory', 'edit_file', 'get_path_info', 'list_directory', 'list_roots', 'move_path', 'read_document', 'read_file', 'rename_path', 'run_command', 'search_files', 'write_file']);
   assert.ok(tools.filter((tool) => ['read_file', 'get_path_info', 'list_directory', 'list_roots', 'search_files'].includes(tool.name)).every((tool) => tool.annotations.readOnlyHint));
   assert.equal(tools.find((tool) => tool.name === 'run_command').annotations.destructiveHint, true);
   const { value } = await call('list_roots');

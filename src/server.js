@@ -20,7 +20,7 @@ function json(response, status, value, headers = {}) {
 }
 
 export function createHttpServer(config, desktop, confirm = config.approvalMode === 'host' ? hostApproval : confirmLocally) {
-  const tasks = new CommandTasks();
+  const tasks = new CommandTasks(path.join(path.dirname(config.configFile), '.runtime', 'tasks'));
   desktop ||= new DesktopControl(config, new LocalFiles(
     config.roots, [config.configFile, path.join(path.dirname(config.configFile), '.runtime')], config.accessMode,
   ), undefined, confirm);

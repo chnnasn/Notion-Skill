@@ -4,6 +4,7 @@ import { stat, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import { FileAccessError } from './filesystem.js';
 import { authorizeAction, confirmLocally, riskSchema } from './approval.js';
@@ -20,7 +21,7 @@ export const commandSchema = z.object({
   risk: riskSchema,
 }).strict();
 
-export async function runCommand(args, files, signal, confirm = confirmLocally) {
+export async function runCommand(args, files, signal, confirm = confirmLocally, onOutput) {
   args = commandSchema.parse(args);
   if (process.platform !== 'win32') throw new FileAccessError('UNSUPPORTED_PLATFORM', '命令行工具当前支持 Windows。');
   const cwd = await files.resolve(args.cwd);
@@ -76,6 +77,7 @@ ${args.command}
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       const output = { stdout: [], stderr: [] };
+      const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
       let remaining = args.max_output_bytes;
       let truncated = false;
       let stopReason = null;
@@ -86,6 +88,8 @@ ${args.command}
       const onAbort = () => { void stop('cancelled'); };
 
       function collect(stream, chunk) {
+        const text = decoders[stream].write(chunk);
+        if (text) onOutput?.(stream, text);
         const length = Math.min(remaining, chunk.length);
         if (length) output[stream].push(Buffer.from(chunk.subarray(0, length)));
         remaining -= length;
@@ -98,6 +102,10 @@ ${args.command}
         clearTimeout(timeout);
         clearTimeout(drainTimer);
         signal?.removeEventListener('abort', onAbort);
+        for (const stream of ['stdout', 'stderr']) {
+          const tail = decoders[stream].end();
+          if (tail) onOutput?.(stream, tail);
+        }
         child.stdout.destroy();
         child.stderr.destroy();
         if (error) { reject(error); return; }

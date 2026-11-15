@@ -5,7 +5,8 @@ import { DesktopControl, windowsDesktop } from './desktop.js';
 import { commandSchema, runCommand } from './commands.js';
 import { confirmLocally, hostApproval, riskSchema } from './approval.js';
 import path from 'node:path';
-import { FileActions, writeSchema, directorySchema, copySchema } from './file-actions.js';
+import { FileActions, writeSchema, directorySchema, copySchema, moveSchema, renameSchema, editSchema } from './file-actions.js';
+import { documentSchema, readDocument } from './documents.js';
 
 const pathInput = z.string().min(1).max(4096)
   .describe('Absolute local path, or a path relative to list_roots.relative_path_base. In all access mode, any ordinary path readable by this Windows account is supported.');
@@ -112,6 +113,16 @@ export function createMcpServer(config, desktop, confirm = confirmLocally, tasks
   });
 
   const mutation = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
+  server.registerTool('move_path', { title: '移动文件或目录', description: 'Move a file or same-volume directory to a new path. Refuses existing targets, protected ancestors and access roots. Cross-volume directories require copy_directory first. Review source and destination.', inputSchema: moveSchema, annotations: mutation },
+    (args, extra) => result(() => actions.move(args, extra.signal)));
+  server.registerTool('rename_path', { title: '重命名文件或目录', description: 'Rename a file or directory in place. name is a single filename, destination must not exist.', inputSchema: renameSchema, annotations: mutation },
+    (args, extra) => result(() => actions.rename(args, extra.signal)));
+  server.registerTool('copy_directory', { title: '复制目录', description: 'Recursively copy a directory into a new target, up to 10000 entries and 2 GiB. Refuses links, protected paths and existing targets. Stages the copy before publishing.', inputSchema: copySchema, annotations: { ...mutation, destructiveHint: false } },
+    (args, extra) => result(() => actions.copyDirectory(args, extra.signal)));
+  server.registerTool('edit_file', { title: '局部编辑文本', description: 'Apply ordered exact-text replacements to UTF-8/UTF-16LE files up to 512 KiB, keeping a backup. Each old_text must match once unless replace_all=true. Optional expected_sha256 checks the original file. Review edits before approval.', inputSchema: editSchema, annotations: mutation },
+    (args, extra) => result(() => actions.edit(args, extra.signal)));
+  server.registerTool('read_document', { title: '解析文档正文', description: 'Extract text from PDF, DOCX, XLSX, PPTX and UTF-8 text up to 20 MiB. offset/length count characters. Follow next_offset, check modified_at and extraction_truncated. PDF extraction uses text layers, scanned images need OCR. Office formatting may be simplified. Processing is limited to 30 seconds.', inputSchema: documentSchema, annotations: readAnnotations },
+    (args, extra) => result(() => readDocument(args, files, extra.signal)));
   server.registerTool('write_file', {
     title: '新建或写入文件', description: 'Write UTF-8, UTF-16LE or base64 bytes. Parent must exist. Default refuses existing files. overwrite=true replaces a file and saves a sibling backup, returned as backup_path. Review content and destination before approval.',
     inputSchema: writeSchema, annotations: mutation,
@@ -127,11 +138,15 @@ export function createMcpServer(config, desktop, confirm = confirmLocally, tasks
 
   if (tasks) {
     server.registerTool('start_command', {
-      title: '启动长时间命令', description: 'Start a background PowerShell/CMD command and return task_id immediately. Prefer for git clone, installs, scripts and builds. Review the full command before starting. Poll get_command_task every 3-5 seconds until terminal status. Do not resubmit a running command. Tasks survive HTTP disconnects, expire one hour after completion and are lost on server restart. timeout_ms bounds execution. Host manages approval.',
+      title: '启动长时间命令', description: 'Start a background PowerShell/CMD command and return task_id immediately. Prefer for git clone, installs, scripts and builds. Review the full command before starting. Poll get_command_task every 3-5 seconds until terminal status. Do not resubmit a running command. Task records and logs persist to disk. After a crash, interrupted records require inspecting actual state. timeout_ms bounds execution. Host manages approval.',
       inputSchema: commandSchema, annotations: mutation,
-    }, (args) => result(() => tasks.start((signal) => runCommand(args, files, signal, confirm))));
+    }, (args) => result(() => tasks.start((signal, onOutput) => runCommand(args, files, signal, confirm, onOutput), args)));
+    server.registerTool('list_command_tasks', { title: '查询历史命令任务', description: 'List persistent task records, newest first. Use after reconnecting to recover task IDs. interrupted means execution state is uncertain after server restart, inspect actual effects before retrying.', inputSchema: { offset: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(100).default(50) }, annotations: readAnnotations },
+      ({ offset, limit }) => result(() => tasks.list(offset, limit)));
+    server.registerTool('read_command_log', { title: '读取实时命令日志', description: 'Read incremental UTF-8 stdout/stderr logs while a command runs. offset/length count bytes. Always pass returned next_offset on next poll, even at current EOF. Log capped at 8 MiB. Final command result output has a separate output limit.', inputSchema: { task_id: z.string().uuid(), offset: z.number().int().min(0).default(0), length: z.number().int().min(4).max(16384).default(8192) }, annotations: readAnnotations },
+      ({ task_id, offset, length }) => result(() => tasks.logs(task_id, offset, length)));
     server.registerTool('get_command_task', {
-      title: '查询命令任务', description: 'Get background command status and final stdout/stderr/exit_code. running means still executing. Report task errors accurately. Unknown task after restart requires inspecting actual state before retry.',
+      title: '查询命令任务', description: 'Get persistent command status and final output. running means executing, interrupted means the server stopped before a reliable final result was saved. Inspect actual effects before retrying interrupted tasks.',
       inputSchema: { task_id: z.string().uuid() }, annotations: readAnnotations,
     }, ({ task_id }) => result(() => tasks.get(task_id)));
     server.registerTool('cancel_command_task', {

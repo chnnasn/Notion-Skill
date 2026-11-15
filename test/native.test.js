@@ -66,4 +66,17 @@ test('native HTTP commands return task IDs and survive request disconnects witho
   assert.equal(task.result.safety.decision, 'host_managed');
   const created = await second.callTool({ name: 'write_file', arguments: { path: 'native.txt', content: 'hello' } });
   assert.equal(created.structuredContent.status, 'created');
+  const invoke = async (name, args) => {
+    const result = await second.callTool({ name, arguments: args });
+    assert.ok(!result.isError, JSON.stringify(result));
+    return result.structuredContent;
+  };
+  await invoke('edit_file', { path: 'native.txt', edits: [{ old_text: 'hello', new_text: 'edited' }] });
+  await invoke('rename_path', { path: 'native.txt', name: 'renamed.txt' });
+  await invoke('create_directory', { path: 'folder' });
+  await invoke('move_path', { source: 'renamed.txt', destination: 'folder/moved.txt' });
+  await invoke('copy_directory', { source: 'folder', destination: 'copied-folder' });
+  assert.equal((await invoke('read_document', { path: 'copied-folder/moved.txt' })).content, 'edited');
+  assert.ok((await invoke('list_command_tasks', {})).tasks.some((task) => task.task_id === id));
+  assert.match((await invoke('read_command_log', { task_id: id })).content, /done/);
 });
