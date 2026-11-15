@@ -51,7 +51,7 @@ test('desktop tools preserve path boundaries, expose actions, and coalesce concu
     requestInit: { headers: { Authorization: `Bearer ${config.token}` } },
   }));
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 15);
   assert.equal(tools.find((tool) => tool.name === 'list_apps').annotations.readOnlyHint, true);
   assert.equal(tools.find((tool) => tool.name === 'open_path').annotations.readOnlyHint, false);
   const invoke = (name, args) => client.callTool({ name, arguments: args });

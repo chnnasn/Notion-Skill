@@ -1,8 +1,8 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { FileAccessError, isWithin, LocalFiles, validatePath } from './filesystem.js';
-import { readJson, saveJson } from './storage.js';
+import { FileAccessError, validatePath } from './filesystem.js';
+import { readJson } from './storage.js';
 
 export const CONFIG_FILENAME = '.notion-local-mcp.json';
 
@@ -12,11 +12,10 @@ const configSchema = z.object({
   token: z.string().regex(/^[A-Za-z0-9_-]{32,256}$/),
   port: z.number().int().min(1).max(65535).default(3210),
   publicUrl: z.string().url().optional(),
-  approvalMode: z.enum(['local', 'host']).default('local'),
+  approvalMode: z.enum(['local', 'host']).default('host'),
   notion: z.object({
     deviceId: z.string().uuid(),
     oauthPort: z.number().int().min(1).max(65535).default(3211),
-    pollSeconds: z.number().int().min(5).max(300).default(10),
   }).strict().optional(),
   desktop: z.object({
     enabled: z.boolean().default(false),
@@ -51,40 +50,6 @@ function absoluteAccessPath(input) {
   return path.resolve(input);
 }
 
-export async function allowPath(config, input) {
-  const resolved = await realpath(absoluteAccessPath(input));
-  const info = await stat(resolved);
-  if (!info.isDirectory() && !info.isFile()) throw new FileAccessError('INVALID_PATH', '只能授权普通文件或目录。');
-  const directory = info.isDirectory() ? resolved : path.dirname(resolved);
-  const runtime = path.join(path.dirname(config.configFile), '.runtime');
-  const files = new LocalFiles([directory], [config.configFile, runtime]);
-  await files.resolve(resolved);
-  if (config.accessMode === 'all') {
-    return {
-      status: 'already_allowed', access_mode: 'all', path: resolved,
-      added_root: null, relative_path_base: config.roots[0], persistent: true,
-    };
-  }
-  const filename = path.join(runtime, 'access.json');
-  const grants = await readGrants(filename);
-  const currentRoots = [...new Set([...config.roots, ...grants.roots])];
-  const added = !currentRoots.some((root) => isWithin(root, resolved));
-  if (added) {
-    grants.roots.push(directory);
-    await saveJson(filename, grants);
-    currentRoots.push(directory);
-  }
-  config.roots = currentRoots;
-  return {
-    status: added ? 'allowed' : 'already_allowed',
-    path: resolved,
-    added_root: added ? directory : null,
-    roots: currentRoots,
-    relative_path_base: currentRoots[0],
-    persistent: true,
-  };
-}
-
 export async function loadConfig(env = process.env) {
   const filename = configPath(env);
   let data;
@@ -96,6 +61,8 @@ export async function loadConfig(env = process.env) {
     }
     throw new Error('配置文件读取失败，请检查权限和 JSON 格式。');
   }
+  // Ignore the retired polling option when loading existing installations.
+  if (data.notion) delete data.notion.pollSeconds;
   const parsed = configSchema.safeParse({
     ...data,
     ...(env.NOTION_MCP_TOKEN ? { token: env.NOTION_MCP_TOKEN } : {}),

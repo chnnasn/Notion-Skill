@@ -63,17 +63,30 @@ try {
         $npmCli = Join-Path (Split-Path -Parent $nodeExecutable) 'node_modules\npm\bin\npm-cli.js'
         if (!(Test-Path -LiteralPath $npmCli)) { throw 'npm is missing from this Node.js installation.' }
 
-        # Stop a receiver before replacing dependencies or refreshing OAuth credentials.
+        # Stop the native service before replacing dependencies.
         if ((Test-Path -LiteralPath $configFile) -and (Test-Path -LiteralPath 'node_modules\@modelcontextprotocol\sdk\package.json')) {
-            Invoke-NodeStep @('src/launcher.js', 'stop')
+            Invoke-NodeStep @('src/runtime.js', 'stop')
         }
         Invoke-NodeStep @($npmCli, 'ci', '--no-audit', '--no-fund')
         if (!(Test-Path -LiteralPath $configFile)) { Invoke-NodeStep (@('src/setup.js') + $Roots) }
+        Invoke-NodeStep @('src/runtime.js', 'configure')
+        $tunnelPath = Join-Path $runtimeDirectory 'cloudflared.exe'
+        if (!(Test-Path -LiteralPath $tunnelPath)) {
+            $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/cloudflare/cloudflared/releases/latest'
+            $tunnelArchitecture = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'arm64' } else { 'amd64' }
+            $assetName = "cloudflared-windows-$tunnelArchitecture.exe"
+            $asset = @($release.assets | Where-Object name -EQ $assetName)
+            if ($asset.Count -ne 1 -or !$asset[0].digest.StartsWith('sha256:')) { throw 'Official cloudflared SHA256 digest is missing.' }
+            Invoke-WebRequest -UseBasicParsing -Uri $asset[0].browser_download_url -OutFile $tunnelPath -TimeoutSec 120
+            if ((Get-FileHash -LiteralPath $tunnelPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $asset[0].digest.Substring(7)) {
+                Remove-Item -LiteralPath $tunnelPath
+                throw 'cloudflared checksum mismatch.'
+            }
+        }
         Invoke-NodeStep @('src/login.js')
         Invoke-NodeStep @('src/install.js')
-        Invoke-NodeStep @('src/launcher.js', 'configure')
-        Invoke-NodeStep @('src/launcher.js', 'open')
-        Write-Host 'Setup complete. The receiver is online for this Windows session. Use the Skill in Notion to control MCP.'
+        Invoke-NodeStep @('src/runtime.js', 'start')
+        Write-Host 'Native MCP is ready. Add the URL and Bearer token from .runtime/native-connection.json in Notion, then select Review for me.'
     } finally { Pop-Location }
 } catch {
     Write-Error $_ -ErrorAction Continue

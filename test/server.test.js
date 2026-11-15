@@ -62,7 +62,7 @@ before(async () => {
   await writeFile(path.join(root, '子目录', 'report.md'), '# Report\nLocal file content');
   await writeFile(path.join(outside, 'secret.txt'), 'outside secret');
   configFile = path.join(root, CONFIG_FILENAME);
-  await writeFile(configFile, JSON.stringify({ roots: [root], token, port: 3210 }));
+  await writeFile(configFile, JSON.stringify({ roots: [root], token, port: 3210, approvalMode: 'local' }));
   await link(configFile, path.join(root, 'config-hardlink'));
   await symlink(outside, path.join(root, 'outside-link'), process.platform === 'win32' ? 'junction' : 'dir');
   await symlink(path.join(root, '子目录'), path.join(root, 'inside-link'), process.platform === 'win32' ? 'junction' : 'dir');

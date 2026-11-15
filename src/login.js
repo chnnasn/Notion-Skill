@@ -9,9 +9,9 @@ async function login() {
   const config = await readJson(filename, null);
   if (!config) throw new Error('请先运行 npm run setup。');
   const runtime = path.join(path.dirname(filename), '.runtime');
-  const unlock = await acquireLock(path.join(runtime, 'client.lock'));
+  const unlock = await acquireLock(path.join(runtime, 'setup.lock'));
   try {
-    config.notion ||= { deviceId: randomUUID(), oauthPort: 3211, pollSeconds: 10 };
+    config.notion ||= { deviceId: randomUUID(), oauthPort: 3211 };
     config.desktop ||= { enabled: true, apps: { notepad: { executable: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'notepad.exe'), description: '记事本', packageName: 'Microsoft.WindowsNotepad' } } };
     config.desktop.enabled = true;
     await saveJson(filename, config);

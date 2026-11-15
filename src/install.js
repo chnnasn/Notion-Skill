@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from './config.js';
 import { connectNotion } from './notion-auth.js';
-import { callNotion, deviceTag, pageId } from './notion-queue.js';
+import { callNotion, pageId } from './notion-api.js';
 import { acquireLock, readJson, saveJson } from './storage.js';
 
 const skillTitle = 'Notion-skill';
@@ -27,12 +27,11 @@ async function install() {
   const config = await loadConfig();
   if (!config.notion) throw new Error('请先运行 npm run login。');
   const runtime = path.join(path.dirname(config.configFile), '.runtime');
-  const unlock = await acquireLock(path.join(runtime, 'client.lock'));
+  const unlock = await acquireLock(path.join(runtime, 'setup.lock'));
   let client;
   try {
-    const template = await readFile(new URL(config.approvalMode === 'host'
-      ? '../skills/notion-local-files/NATIVE.md' : '../skills/notion-local-files/SKILL.md', import.meta.url), 'utf8');
-    const markdown = template.replaceAll('{{DEVICE_ID}}', config.notion.deviceId).replaceAll('{{DEVICE_TAG}}', deviceTag(config.notion.deviceId));
+    const template = await readFile(new URL('../skills/notion-local-files/SKILL.md', import.meta.url), 'utf8');
+    const markdown = template.replaceAll('{{DEVICE_ID}}', config.notion.deviceId);
     const description = markdown.match(/^description: (.+)$/m)[1];
     const content = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').trim();
     const folder = path.join(runtime, 'notion-local-files');
@@ -75,9 +74,7 @@ async function install() {
     state.installed = new Date().toISOString();
     await saveJson(filename, state);
     console.log(`Skill 已安装并开启自动调用 ${state.url}`);
-    console.log(config.approvalMode === 'host'
-      ? '在 Notion 添加原生 MCP HTTPS 连接后，新建聊天使用。审批由 Notion 当前模式管理。'
-      : '在 Notion 新建聊天后使用。接收器在线期间，可以通过 Skill 开启、关闭或按需启动 MCP。');
+    console.log('在 Notion 添加原生 MCP HTTPS 连接后，新建聊天使用。审批由 Notion 当前模式管理。');
   } finally {
     await client?.close();
     await unlock();

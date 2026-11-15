@@ -11,13 +11,11 @@
     "setup": "node src/setup.js",
     "start": "node src/server.js",
     "login": "node src/login.js",
-    "client": "node src/worker.js",
-    "open-notion": "node src/launcher.js",
-    "client:stop": "node src/launcher.js stop",
-    "client:status": "node src/launcher.js status",
-    "verify": "node src/verify.js",
     "install-skill": "node src/install.js",
-    "test": "node --test"
+    "test": "node --test",
+    "native": "node src/runtime.js start",
+    "native:stop": "node src/runtime.js stop",
+    "native:status": "node src/runtime.js status"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
