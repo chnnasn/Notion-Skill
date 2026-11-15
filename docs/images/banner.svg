@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M60 0H0V60" fill="none" stroke="#1d1d2b" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="480" fill="#0d0d14"/>
+  <rect width="1200" height="480" fill="url(#grid)"/>
+
+  <text x="600" y="118" text-anchor="middle" font-size="88" font-weight="700" fill="#ffffff">Notion-Skill</text>
+  <text x="600" y="168" text-anchor="middle" font-size="29" fill="#b79cff">Control your Windows PC from Notion, via MCP</text>
+
+  <!-- Chat window (left) -->
+  <g stroke="#8f7fe0" stroke-width="3" fill="#171724">
+    <rect x="90" y="225" width="300" height="185" rx="14"/>
+  </g>
+  <circle cx="118" cy="252" r="6" fill="#8f7fe0"/>
+  <circle cx="142" cy="252" r="6" fill="#e8e6f5"/>
+  <circle cx="166" cy="252" r="6" fill="#3a3a4d"/>
+  <text x="362" y="260" text-anchor="end" font-size="17" fill="#cfcbe8">Chat</text>
+  <g fill="#4a4368">
+    <rect x="112" y="285" width="110" height="100" rx="10"/>
+  </g>
+  <g stroke="#9d8ff0" stroke-width="6" stroke-linecap="round">
+    <line x1="128" y1="305" x2="196" y2="305"/>
+    <line x1="128" y1="325" x2="206" y2="325"/>
+    <line x1="128" y1="345" x2="188" y2="345"/>
+    <line x1="128" y1="365" x2="198" y2="365"/>
+  </g>
+  <rect x="238" y="278" width="128" height="118" rx="6" fill="#eceaf7"/>
+  <g stroke="#8f83c9" stroke-width="5" stroke-linecap="round">
+    <line x1="254" y1="306" x2="350" y2="306"/>
+    <line x1="254" y1="326" x2="350" y2="326"/>
+    <line x1="254" y1="346" x2="350" y2="346"/>
+    <line x1="254" y1="366" x2="322" y2="366"/>
+  </g>
+
+  <!-- Connection stream (center) -->
+  <line x1="390" y1="318" x2="810" y2="318" stroke="#6d5bd0" stroke-width="2" stroke-dasharray="2 10" stroke-linecap="round"/>
+  <g fill="#cfc4ff">
+    <circle cx="440" cy="318" r="5"/>
+    <circle cx="520" cy="318" r="5"/>
+    <circle cx="680" cy="318" r="5"/>
+    <circle cx="760" cy="318" r="5"/>
+  </g>
+  <!-- Shield -->
+  <g transform="translate(600 318)">
+    <path d="M0 -26 L22 -17 V4 C22 18 12 26 0 32 C-12 26 -22 18 -22 4 V-17 Z" fill="#241f3d" stroke="#9d8ff0" stroke-width="3"/>
+    <path d="M-9 2 L-2 9 L11 -6" fill="none" stroke="#b79cff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Windows PC (right) -->
+  <g stroke="#8f7fe0" stroke-width="3" fill="#14141f">
+    <rect x="810" y="225" width="300" height="165" rx="10"/>
+  </g>
+  <g fill="#8f7fe0">
+    <rect x="830" y="245" width="16" height="12"/>
+    <rect x="830" y="268" width="16" height="12"/>
+    <rect x="830" y="291" width="16" height="12"/>
+  </g>
+  <g fill="#9d8ff0">
+    <rect x="838" y="362" width="9" height="9"/>
+    <rect x="849" y="362" width="9" height="9"/>
+    <rect x="838" y="373" width="9" height="9"/>
+    <rect x="849" y="373" width="9" height="9"/>
+  </g>
+  <path d="M945 390 L940 420 M975 390 L980 420" stroke="#8f7fe0" stroke-width="3"/>
+  <rect x="905" y="420" width="110" height="8" rx="4" fill="#8f7fe0"/>
+</svg>

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#7c5cd6"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="640" fill="#ffffff"/>
+
+  <g>
+    <rect x="40" y="265" width="260" height="110" rx="16" fill="#f2f2f4" stroke="#9a9aad" stroke-width="1.5"/>
+    <text x="170" y="334" text-anchor="middle" font-size="31" fill="#111111">pending</text>
+  </g>
+  <line x1="310" y1="320" x2="410" y2="320" stroke="#7c5cd6" stroke-width="4" marker-end="url(#arrow)"/>
+  <g>
+    <rect x="420" y="265" width="260" height="110" rx="16" fill="#f2f2f4" stroke="#9a9aad" stroke-width="1.5"/>
+    <text x="550" y="334" text-anchor="middle" font-size="31" fill="#111111">running</text>
+  </g>
+
+  <!-- Fan-out arrows -->
+  <g stroke="#7c5cd6" stroke-width="4">
+    <line x1="690" y1="320" x2="870" y2="75" marker-end="url(#arrow)"/>
+    <line x1="690" y1="320" x2="870" y2="200" marker-end="url(#arrow)"/>
+    <line x1="690" y1="320" x2="870" y2="325" marker-end="url(#arrow)"/>
+    <line x1="690" y1="320" x2="870" y2="450" marker-end="url(#arrow)"/>
+    <line x1="690" y1="320" x2="870" y2="575" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- End states -->
+  <g>
+    <rect x="880" y="30" width="280" height="90" rx="16" fill="#f2f2f4" stroke="#9a9aad" stroke-width="1.5"/>
+    <text x="1020" y="88" text-anchor="middle" font-size="30" fill="#111111">completed</text>
+  </g>
+  <g>
+    <rect x="880" y="155" width="280" height="90" rx="16" fill="#f2f2f4" stroke="#9a9aad" stroke-width="1.5"/>
+    <text x="1020" y="213" text-anchor="middle" font-size="30" fill="#111111">failed</text>
+  </g>
+  <g>
+    <rect x="880" y="280" width="280" height="90" rx="16" fill="#f2f2f4" stroke="#9a9aad" stroke-width="1.5"/>
+    <text x="1020" y="338" text-anchor="middle" font-size="30" fill="#111111">timed_out</text>
+  </g>
+  <g>
+    <rect x="880" y="405" width="280" height="90" rx="16" fill="#f2f2f4" stroke="#9a9aad" stroke-width="1.5"/>
+    <text x="1020" y="463" text-anchor="middle" font-size="30" fill="#111111">cancelled</text>
+  </g>
+  <g>
+    <rect x="880" y="530" width="280" height="90" rx="16" fill="#f2f2f4" stroke="#9a9aad" stroke-width="1.5"/>
+    <text x="1020" y="588" text-anchor="middle" font-size="30" fill="#111111">interrupted</text>
+  </g>
+</svg>
